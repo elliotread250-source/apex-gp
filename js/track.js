@@ -127,7 +127,7 @@ function makeNoise(seed) {
 }
 
 // ============================================================ WORLD
-export function buildWorld(def, T, renderer, { quality = 'high', profile = null } = {}) {
+export function buildWorld(def, T, renderer, { Q, profile = null } = {}) {
   const tr = buildTrack(def);
   const R = rng(def.id.length * 977 + 13);
   const scene = new THREE.Scene();
@@ -137,7 +137,7 @@ export function buildWorld(def, T, renderer, { quality = 'high', profile = null 
   const size = Math.max(tr.bounds.max.x - tr.bounds.min.x, tr.bounds.max.z - tr.bounds.min.z);
 
   // ---- sky + environment lighting
-  const sky = new Sky(); sky.scale.setScalar(20000);
+  const sky = new Sky(); sky.scale.setScalar(8000);
   const su = sky.material.uniforms;
   su.turbidity.value = def.sky.turbidity; su.rayleigh.value = def.sky.rayleigh; su.mieCoefficient.value = 0.005; su.mieDirectionalG.value = 0.8;
   const sunDir = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - def.sky.elev), THREE.MathUtils.degToRad(def.sky.azim));
@@ -149,7 +149,7 @@ export function buildWorld(def, T, renderer, { quality = 'high', profile = null 
 
   scene.add(new THREE.HemisphereLight('#dbe8ff', tr.street ? '#6d6356' : '#4a5f33', def.hemi * 0.6));
   const sun = new THREE.DirectionalLight('#fff3e2', def.sunI);
-  sun.castShadow = true; sun.shadow.mapSize.set(quality === 'high' ? 4096 : 1024, quality === 'high' ? 4096 : 1024);
+  sun.castShadow = Q.shadows > 0; sun.shadow.mapSize.set(Q.shadows || 512, Q.shadows || 512);
   Object.assign(sun.shadow.camera, { left: -60, right: 60, top: 60, bottom: -60, near: 1, far: 600 });
   sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target);
@@ -162,7 +162,7 @@ export function buildWorld(def, T, renderer, { quality = 'high', profile = null 
     return f * f * (3 - 2 * f) * n * 26;
   };
   tr.heightAt = heightAt;
-  const gSize = size + 3000, gSeg = quality === 'high' ? 220 : 120;
+  const gSize = size + 3000, gSeg = Q.terrainSeg;
   const gGeo = new THREE.PlaneGeometry(gSize, gSize, gSeg, gSeg); gGeo.rotateX(-Math.PI / 2);
   const gp = gGeo.attributes.position, gcol = [];
   for (let i = 0; i < gp.count; i++) {
@@ -178,24 +178,25 @@ export function buildWorld(def, T, renderer, { quality = 'high', profile = null 
 
   // ---- road
   const road = new THREE.Mesh(ribbon(tr, tr.halfW, -tr.halfW, 0.02, 0.02, { vScale: 13 }),
-    std({ map: T.asphalt, normalMap: T.asphaltN, normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.82, side: THREE.DoubleSide }));
+    std({ map: T.asphalt, normalMap: T.asphaltN, normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.82, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
   road.receiveShadow = true; scene.add(road);
   // rubbered-in racing line
   const rub = new THREE.Mesh(ribbon(tr, j => tr.line[j] + 1.1, j => tr.line[j] - 1.1, 0.024, 0.024, { vScale: 13 }),
-    new THREE.MeshBasicMaterial({ color: '#000', transparent: true, opacity: 0.2, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 }));
+    new THREE.MeshBasicMaterial({ color: '#000', transparent: true, opacity: 0.2, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
   scene.add(rub);
   // kerbs, raised on the outside edge
-  const kerbM = std({ map: T.kerb, normalMap: T.kerbN, roughness: 0.6, side: THREE.DoubleSide });
+  const kerbM = std({ map: T.kerb, normalMap: T.kerbN, roughness: 0.6, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
   for (const s of [1, -1]) {
     const m = new THREE.Mesh(ribbon(tr, s * (tr.halfW - 0.1), s * (tr.halfW + tr.kerbW), 0.035, 0.09, { vScale: 3, filter: j => tr.kerb[j] }), kerbM);
     m.receiveShadow = true; scene.add(m);
   }
   if (tr.street) {
-    const walk = std({ color: '#a7a39a', roughness: 0.9, side: THREE.DoubleSide });
+    const walk = std({ color: '#a7a39a', roughness: 0.9, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
     for (const s of [1, -1]) scene.add(new THREE.Mesh(ribbon(tr, s * tr.wallD, s * tr.halfW, 0.04, 0.04, { vScale: 4 }), walk));
   } else {
     // painted asphalt run-off and gravel traps on corner exits
-    const runM = std({ map: T.runoff, roughness: 0.85, side: THREE.DoubleSide }), gravM = std({ map: T.gravel, normalMap: T.gravelN, roughness: 1, side: THREE.DoubleSide });
+    const off = { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
+    const runM = std({ map: T.runoff, roughness: 0.85, side: THREE.DoubleSide, ...off }), gravM = std({ map: T.gravel, normalMap: T.gravelN, roughness: 1, side: THREE.DoubleSide, ...off });
     const inner = tr.halfW + 0.2, outer = tr.wallD - 0.3;
     for (const [s, arr] of [[1, tr.runL], [-1, tr.runR]]) {
       const a = new THREE.Mesh(ribbon(tr, s * inner, s * outer, 0.025, 0.025, { vScale: 6, filter: j => arr[j] === 1 }), runM); a.receiveShadow = true; scene.add(a);
@@ -229,9 +230,9 @@ export function buildWorld(def, T, renderer, { quality = 'high', profile = null 
   // ---- start line, grid, gantry
   {
     const p = tr.P[0], t = tr.T[0];
-    const lineM = new THREE.Mesh(new THREE.PlaneGeometry(tr.halfW * 2, 2.2), std({ map: T.checker, roughness: 0.7 }));
+    const lineM = new THREE.Mesh(new THREE.PlaneGeometry(tr.halfW * 2, 2.2), std({ map: T.checker, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5 }));
     lineM.rotation.set(-Math.PI / 2, 0, Math.atan2(t.x, t.z)); lineM.position.set(p.x, 0.03, p.z); scene.add(lineM);
-    const slotM = new THREE.MeshBasicMaterial({ color: '#e8e8e8' });
+    const slotM = new THREE.MeshBasicMaterial({ color: '#e8e8e8', polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5 });
     for (let k = 0; k < 10; k++) {
       const gp = gridPose(tr, k);
       const bar = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.25), slotM);
@@ -275,7 +276,7 @@ export function buildWorld(def, T, renderer, { quality = 'high', profile = null 
     }
   }
 
-  if (tr.street) buildCity(scene, tr, T, R); else buildPark(scene, tr, T, R, heightAt, quality);
+  if (tr.street) buildCity(scene, tr, T, R); else buildPark(scene, tr, T, R, heightAt, Q);
 
   // distant hills / mountains
   // distant rolling hills: a ring of terrain rising beyond the circuit
@@ -299,7 +300,7 @@ export function buildWorld(def, T, renderer, { quality = 'high', profile = null 
   return { scene, tr, sun, sunDir, sky, lightsMats, env };
 }
 
-function buildPark(scene, tr, T, R, heightAt, quality) {
+function buildPark(scene, tr, T, R, heightAt, Q) {
   const std = o => new THREE.MeshStandardMaterial(o);
   const standM = std({ color: '#555a63', roughness: 0.8 }), crowdM = std({ map: T.crowd, roughness: 0.9 }), roofM = std({ color: '#e8e8ea', roughness: 0.5, metalness: 0.3 });
   const placeStand = (s, side) => {
@@ -329,7 +330,7 @@ function buildPark(scene, tr, T, R, heightAt, quality) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.4, 2.2), mpM); m.position.set(p.x + p.nx * off, 1.2, p.z + p.nz * off); m.rotation.y = Math.atan2(p.tx, p.tz); m.castShadow = true; scene.add(m);
   }
   // trees (instanced, colour-varied)
-  const COUNT = quality === 'high' ? 1400 : 600;
+  const COUNT = Q.trees;
   const trunkGeo = new THREE.CylinderGeometry(0.25, 0.4, 4, 6); trunkGeo.translate(0, 2, 0);
   const pineGeo = new THREE.ConeGeometry(3, 7, 8); pineGeo.translate(0, 6.5, 0);
   const pine2 = new THREE.ConeGeometry(2.2, 5, 8); pine2.translate(0, 9.5, 0);
@@ -349,7 +350,7 @@ function buildPark(scene, tr, T, R, heightAt, quality) {
     else { col.setHSL(0.22 + R() * 0.08, 0.45, 0.22 + R() * 0.1); leafs.setMatrixAt(nL, m4); leafs.setColorAt(nL, col); nL++; }
   }
   trunks.count = nT; pines.count = pinesTop.count = nP; leafs.count = nL;
-  [pines, pinesTop, leafs].forEach(m => { m.castShadow = true; });
+  // instanced trees would re-draw thousands of instances into the shadow map every frame; skip
   scene.add(trunks, pines, pinesTop, leafs);
 }
 

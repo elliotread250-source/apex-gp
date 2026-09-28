@@ -1,5 +1,4 @@
 import { clamp, store } from './util.js';
-import { ASSETS, sampleEngine } from './assets.js';
 
 function engineVoice(ctx, out, vol = 1) {
   // V6 turbo: firing order harmonics through a waveshaper and two formant filters
@@ -36,7 +35,6 @@ export const audio = {
     const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
     this.master.connect(comp); comp.connect(ctx.destination);
     this.eng = engineVoice(ctx, this.master);
-    if (ASSETS.engine) sampleEngine(ctx, this.master, ASSETS.engine).then(e => { this.sampleEng = e; }).catch(e => console.warn('engine samples failed', e));
     // turbo whistle
     this.turbo = ctx.createOscillator(); this.turbo.type = 'sine'; this.turboG = ctx.createGain(); this.turboG.gain.value = 0;
     this.turbo.connect(this.turboG); this.turboG.connect(this.master); this.turbo.start();

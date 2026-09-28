@@ -120,8 +120,8 @@ export function createFX(scene, T) {
 
 // ---------------- rear-view mirrors ----------------
 export function createMirror() {
-  const rt = new THREE.WebGLRenderTarget(512, 160, { samples: 2 });
+  const rt = new THREE.WebGLRenderTarget(384, 120, { samples: 0 });
   rt.texture.colorSpace = THREE.SRGBColorSpace;
-  const cam = new THREE.PerspectiveCamera(38, 512 / 160, 0.3, 1500);
+  const cam = new THREE.PerspectiveCamera(38, 384 / 120, 0.3, 800);
   return { rt, cam };
 }

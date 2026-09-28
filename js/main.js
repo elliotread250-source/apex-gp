@@ -8,21 +8,39 @@ import { buildWorld, sampleAt, gridPose, nearestIdx, surfaceAt, disposeScene } f
 import { SURF, createCarPhys, stepCar, steerLimit, speedProfile, createAI, aiAccel, maxLatAccel, topSpeed } from './physics.js';
 import { createPost, createFX, createMirror } from './fx.js';
 import { audio } from './audio.js';
-import { ASSETS, loadAssets, carFromAsset } from './assets.js';
+import { ASSETS, loadManifest, ensureModel, hasModel, carFromAsset } from './assets.js';
 
 // ============================================================ RENDERER
-const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', stencil: false });
 renderer.domElement.id = 'gl';
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+// adaptive resolution: starts modest, scales up/down to hold the display's frame rate
+const QUALITY = {
+  high:   { post: true,  mirror: true,  shadows: 2048, player: 'full', ai: 'lod', garage: 'full', trees: 1400, terrainSeg: 220, prStart: 1,    prMax: 1.5 },
+  medium: { post: false, mirror: false, shadows: 1024, player: 'lod',  ai: 'lod', garage: 'lod',  trees: 700,  terrainSeg: 140, prStart: 0.9,  prMax: 1.0 },
+  low:    { post: false, mirror: false, shadows: 0,    player: 'lo',   ai: 'lo',  garage: 'lo',   trees: 250,  terrainSeg: 70,  prStart: 0.65, prMax: 0.8 },
+};
+// pick a sensible default for this machine (school laptops / Chromebooks -> low)
+function detectQuality() {
+  let gpu = '';
+  try { const gl = document.createElement('canvas').getContext('webgl2') || document.createElement('canvas').getContext('webgl'); const e = gl.getExtension('WEBGL_debug_renderer_info'); gpu = e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : ''; } catch {}
+  const cores = navigator.hardwareConcurrency || 4, mem = navigator.deviceMemory || 8;
+  if (/SwiftShader|llvmpipe|Software|Mali|PowerVR|Adreno|Intel.*HD Graphics|Intel\(R\) HD|UHD Graphics 6|Celeron|Pentium/i.test(gpu) || cores <= 2 || mem <= 2) return 'low';
+  if (/Intel|Iris|Radeon\(TM\) Graphics|Radeon Graphics|Vega|Apple M1/i.test(gpu) || cores <= 4 || mem <= 4) return 'medium';
+  return 'high';
+}
+const RES = { pr: 1, min: 0.45, max: 1, acc: 0, frames: 0, good: 0 };
+const Q = () => QUALITY[S.gfx] || QUALITY.medium;
+function applyQuality() { const q = Q(); RES.max = Math.min(devicePixelRatio, q.prMax); RES.pr = Math.min(RES.max, q.prStart); renderer.setPixelRatio(RES.pr); renderer.shadowMap.enabled = q.shadows > 0; }
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.shadowMap.autoUpdate = false; // updated once per frame, not again for the mirror pass
 document.body.prepend(renderer.domElement);
 setAniso(renderer.capabilities.getMaxAnisotropy());
 const T = buildTextures();
 
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.03, 30000);
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.05, 9000);
 let post = null;
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
@@ -65,6 +83,8 @@ function readInput() {
 // ============================================================ STATE
 const S = { mode: 'race', team: 0, track: 0, laps: 3, skill: 0.95, opp: 9, grid: 'back', tyre: 'medium', assists: 'full', gfx: 'high', camMode: 0, manual: false, fov: 62, state: 'menu', time: 0 };
 Object.assign(S, store.get('apex.settings2') || {});
+if (!store.get('apex.gfxChosen') || !QUALITY[S.gfx]) S.gfx = detectQuality();
+applyQuality();
 S.state = 'menu';
 let world = null, player = null, ais = [], fx = null, raceT0 = 0, countdown = null, finishInfo = null;
 
@@ -82,16 +102,16 @@ function startSession() {
   const def = TRACKS[S.track];
   const refSpec = carSpec(TEAMS[1]);
   const trTmp = null;
-  world = buildWorld(def, T, renderer, { quality: S.gfx, profile: null });
+  applyQuality();
+  world = buildWorld(def, T, renderer, { Q: Q(), profile: null });
   const tr = world.tr;
   // brake boards need a speed profile: rebuild just the board pass cheaply by recomputing world with profile
   world.profile = speedProfile(tr, refSpec, 1);
   disposeScene(world.scene);
-  world = Object.assign(buildWorld(def, T, renderer, { quality: S.gfx, profile: world.profile }), { profile: world.profile });
+  world = Object.assign(buildWorld(def, T, renderer, { Q: Q(), profile: world.profile }), { profile: world.profile });
   renderer.toneMappingExposure = def.exposure;
-  renderer.shadowMap.enabled = true;
   fx = createFX(world.scene, T);
-  if (S.gfx === 'high') post = createPost(renderer, world.scene, camera);
+  if (Q().post) post = createPost(renderer, world.scene, camera);
 
   const trk = world.tr;
   const nAI = S.mode === 'race' ? S.opp : 0;
@@ -120,7 +140,7 @@ function startSession() {
 
 function newPlayer(tr, team, gp) {
   const spec = carSpec(team), cmp = COMPOUNDS[S.tyre];
-  const car = ASSETS.car ? carFromAsset(team) : makeCar(team, T, { cockpit: true, compound: cmp.color, mirrorTex: S.gfx === 'high' ? mirror.rt.texture : null });
+  const car = hasModel(Q().player) ? carFromAsset(team, Q().player) : makeCar(team, T, { cockpit: true, compound: cmp.color, mirrorTex: Q().mirror ? mirror.rt.texture : null });
   world.scene.add(car.group);
   const c = createCarPhys(spec, cmp);
   c.x = gp.x; c.z = gp.z; c.h = gp.h;
@@ -134,7 +154,7 @@ function newPlayer(tr, team, gp) {
 }
 function newAI(tr, team, gp) {
   const spec = carSpec(team);
-  const car = ASSETS.car ? carFromAsset(team) : makeCar(team, T, { compound: COMPOUNDS[['soft', 'medium', 'hard'][Math.floor(Math.random() * 3)]].color });
+  const car = hasModel(Q().ai) ? carFromAsset(team, Q().ai) : makeCar(team, T, { compound: COMPOUNDS[['soft', 'medium', 'hard'][Math.floor(Math.random() * 3)]].color });
   world.scene.add(car.group);
   const sk = S.skill * (0.975 + Math.random() * 0.035);
   const a = createAI(spec, sk);
@@ -250,8 +270,8 @@ function updateAIs(dt, locked) {
       if (gap > 0 && gap < 28 && Math.abs(o.lat - a.lat) < 2.6) {
         const side = o.lat > 0 ? -1 : 1;
         const room = side > 0 ? (tr.halfW - 1.3) - o.lat : o.lat - (-tr.halfW + 1.3);
-        if (room > 2.8 && a.v > ov - 2) avoidT = o.lat + side * 3.2 - a.line;
-        if (gap < 11) cap = Math.min(cap, Math.max(0, ov) * (0.98 - (11 - gap) * 0.02));
+        if (room > 2.8 && a.v > ov - 6) avoidT = o.lat + side * 3.2 - a.line;
+        if (gap < 14) cap = Math.min(cap, Math.max(0, ov) + (gap - 7) * 1.2); // close up to ~7 m, then match speed
       }
     }
     if (cap < Infinity) vT = Math.min(vT, cap);
@@ -415,13 +435,13 @@ function drawMinimap() {
   ctx.fillStyle = '#fff'; ctx.strokeStyle = '#e10600'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(X(player.c.x), Z(player.c.z), 12, 0, 7); ctx.fill(); ctx.stroke();
 }
 const tempCol = t => t < 70 ? '#2f7dff' : t < 88 ? '#27c3c9' : t < 112 ? '#1ee36b' : t < 125 ? '#ffb000' : '#ff3030';
-let hudT = 0;
+let hudT = 0, hudN = 0;
 function updateHUD(dt) {
   const p = player, c = p.c, tr = world.tr;
   if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) $('#msg').style.opacity = $('#sub').style.opacity = 0; }
   if (p.stuck > 2.5 && msgTimer <= 0) flash('', 'Stuck? Press R to reset', 2, 'warn');
   if (p.wrongWay > 1) { $('#msg').textContent = 'WRONG WAY'; $('#msg').className = 'warn'; $('#msg').style.opacity = 1; $('#sub').textContent = 'Press R to reset'; $('#sub').style.opacity = 1; msgTimer = 0.3; }
-  hudT += dt; if (hudT < 1 / 30) return; hudT = 0;
+  hudT += dt; if (hudT < 1 / 30) return; hudT = 0; hudN++;
   const kmh = Math.round(Math.abs(c.vx) * 3.6);
   $('#speed').textContent = kmh;
   const gear = c.reverse ? 'R' : (S.state === 'countdown' ? 'N' : c.gear);
@@ -455,14 +475,14 @@ function updateHUD(dt) {
     $('#posTxt').textContent = pos + '/' + st.length;
     $('#lapTxt').textContent = clamp(Math.floor(p.total / tr.L) + 1, 1, S.laps) + '/' + S.laps;
     const lead = st[0];
-    $('#tower').innerHTML = st.map((o, i) => {
+    if ((hudN % 6) === 0) $('#tower').innerHTML = st.map((o, i) => {
       const ov = o === p ? p.c.vx : o.v;
       let gap = i === 0 ? 'LEADER' : o.finished ? 'FIN' : '+' + ((lead.total - o.total) / Math.max(40, ov || 0)).toFixed(1);
       if (!o.finished && lead.total - o.total > tr.L) gap = '+' + Math.floor((lead.total - o.total) / tr.L) + ' LAP';
       return `<div class="r ${o === p ? 'me' : ''}"><span class="p">${i + 1}</span><span class="c" style="background:${o.team.c1}"></span><span>${o === p ? 'YOU' : o.code}</span><span class="g">${gap}</span></div>`;
     }).join('');
   } else { $('#posTxt').textContent = 'TT'; $('#lapTxt').textContent = Math.max(0, p.maxLap + 1); }
-  drawMinimap();
+  if (hudN % 2 === 0) drawMinimap();
   // steering wheel display + LEDs
   const car = p.car;
   if (car.dispCanvas && S.camMode === 0) {
@@ -554,13 +574,14 @@ function updateCamera(dt) {
     camera.position.copy(tmpV.set(0, 1.15, -2.9).applyMatrix4(g.matrixWorld));
     camera.quaternion.setFromAxisAngle(yAxis, c.h); camera.near = 0.05; fov = 62;
   } else if (S.camMode === 0) {
-    const hx = -gLat * 0.01 + jx, hy = 0.9 + jy - Math.max(0, -gLong) * 0.004, hz = -0.46 + clamp(-gLong * 0.008, -0.02, 0.04);
+    const eye = (p.car.fromAsset && ASSETS.cfg.eye) || [0, 0.9, -0.46];
+    const hx = eye[0] - gLat * 0.01 + jx, hy = eye[1] + jy - Math.max(0, -gLong) * 0.004, hz = eye[2] + clamp(-gLong * 0.008, -0.02, 0.04);
     camera.position.copy(tmpV.set(hx, hy, hz).applyMatrix4(g.matrixWorld));
     head.look = lerp(head.look, clamp(c.r * 0.06 + slip * 0.35, -0.2, 0.2), Math.min(1, dt * 2.5));
     camera.quaternion.setFromAxisAngle(yAxis, c.h + Math.PI + head.look);
     tmpQ.setFromAxisAngle(xAxis, -0.02 - Math.max(0, -gLong) * 0.004); camera.quaternion.multiply(tmpQ);
     tmpQ.setFromAxisAngle(zAxis, camRoll); camera.quaternion.multiply(tmpQ);
-    camera.near = 0.03;
+    camera.near = 0.05;
   } else if (S.camMode === 1) {
     camera.position.copy(tmpV.set(jx * 0.5, 1.24 + jy * 0.5, -0.62).applyMatrix4(g.matrixWorld));
     camera.quaternion.setFromAxisAngle(yAxis, c.h + Math.PI);
@@ -591,8 +612,8 @@ function updateCamera(dt) {
 }
 let mirrorFrame = 0;
 function renderMirror() {
-  if (S.gfx !== 'high' || !player.car.mirrors.length || !(S.camMode === 0 || S.camMode === 1)) return;
-  if (++mirrorFrame % 2) return;
+  if (!Q().mirror || !player.car.mirrors.length || !(S.camMode === 0 || S.camMode === 1)) return;
+  if (++mirrorFrame % 3) return;
   const g = player.car.group, mc = mirror.cam;
   mc.position.copy(tmpV.set(0, 1.25, -0.3).applyMatrix4(g.matrixWorld));
   mc.quaternion.setFromAxisAngle(yAxis, player.c.h); tmpQ.setFromAxisAngle(xAxis, -0.04); mc.quaternion.multiply(tmpQ);
@@ -669,10 +690,23 @@ function tick(dt) {
       return { x: a.x, z: a.z, rpm: a.rpm, doppler: clamp((343 + vl) / (343 - vs), 0.7, 1.4) };
     })
   });
+  renderer.shadowMap.needsUpdate = true;
   renderMirror();
   draw();
+  adaptRes(dt);
 }
 function draw() { if (noRender) return; if (post) post.render(); else renderer.render(world.scene, camera); }
+function adaptRes(dt) {
+  RES.acc += dt; RES.frames++;
+  if (RES.acc < 0.75) return;
+  const fps = RES.frames / RES.acc; RES.acc = 0; RES.frames = 0;
+  RES.peak = Math.max((RES.peak || 60) * 0.998, Math.min(fps, 240)); // ≈ display refresh rate
+  const target = RES.peak - 4;
+  let pr = RES.pr;
+  if (fps < target) { pr = Math.max(RES.min, pr - (fps < target * 0.75 ? 0.15 : 0.06)); RES.good = 0; }
+  else if (++RES.good >= 4) { pr = Math.min(RES.max, pr + 0.05); RES.good = 0; }
+  if (Math.abs(pr - RES.pr) > 0.01) { RES.pr = pr; renderer.setPixelRatio(pr); if (post) post.setSize(innerWidth, innerHeight); }
+}
 
 // ============================================================ GARAGE (MENU BACKGROUND)
 const garage = { scene: new THREE.Scene(), cam: new THREE.PerspectiveCamera(32, 1, 0.1, 200), car: null, ang: 0.6, dist: null, y: 2.6, spin: true };
@@ -691,7 +725,8 @@ if (photo) document.body.classList.add('photo');
 }
 function setGarageCar(i) {
   if (garage.car) { garage.scene.remove(garage.car.group); disposeCar(garage.car); }
-  garage.car = ASSETS.car ? carFromAsset(TEAMS[i]) : makeCar(TEAMS[i], T, { compound: COMPOUNDS[S.tyre].color }); garage.scene.add(garage.car.group);
+  const gd = hasModel(Q().garage) ? Q().garage : ['lo', 'lod', 'full'].find(hasModel);
+  garage.car = gd ? carFromAsset(TEAMS[i], gd) : makeCar(TEAMS[i], T, { compound: COMPOUNDS[S.tyre].color }); garage.scene.add(garage.car.group);
 }
 function renderGarage(dt) {
   if (garage.spin) garage.ang += dt * 0.22;
@@ -700,6 +735,8 @@ function renderGarage(dt) {
   const cd = garage.dist || 11 * Math.max(1, (narrow ? 1.1 : 1.7) / cam.aspect);
   cam.position.set(Math.sin(garage.ang) * cd, garage.y, Math.cos(garage.ang) * cd); cam.lookAt(0, 0.4, 0);
   renderer.toneMappingExposure = 1;
+  renderer.shadowMap.needsUpdate = true;
+  adaptRes(dt);
   renderer.render(garage.scene, cam);
 }
 
@@ -759,11 +796,12 @@ function resume() { S.state = S.prevState || 'race'; $('#pause').classList.add('
 function go() {
   $('#loading').classList.remove('hidden'); $('#loading').textContent = 'BUILDING CIRCUIT…';
   S.state = 'loading';
-  setTimeout(() => {
+  const q = Q();
+  Promise.all([ensureModel(q.player, f => { $('#loading').textContent = `LOADING CAR… ${Math.round(f * 100)}%`; }), ensureModel(q.ai)]).then(() => setTimeout(() => {
     clearCars();
     try { startSession(); } catch (e) { console.error(e); $('#loading').textContent = 'Error: ' + e.message; return; }
     $('#loading').classList.add('hidden'); clock.getDelta();
-  }, 30);
+  }, 30));
 }
 $('#startBtn').onclick = go;
 $('#resumeBtn').onclick = resume;
@@ -774,9 +812,11 @@ $('#menuBtn').onclick = showMenu;
 addEventListener('keydown', e => { if (e.code === 'Enter' && S.state === 'menu') go(); });
 
 seg('#modeSeg', 'mode'); seg('#lapSeg', 'laps', Number); seg('#aiSeg', 'skill', Number); seg('#oppSeg', 'opp', Number); seg('#gridSeg', 'grid');
-seg('#tyreSeg', 'tyre', x => x, () => setGarageCar(S.team)); seg('#assistSeg', 'assists'); seg('#gfxSeg', 'gfx');
-$('#loading').textContent = 'LOADING ASSETS…';
-await loadAssets();
+seg('#tyreSeg', 'tyre', x => x, () => setGarageCar(S.team)); seg('#assistSeg', 'assists');
+seg('#gfxSeg', 'gfx', x => x, () => { store.set('apex.gfxChosen', true); applyQuality(); ensureModel(Q().garage).then(() => setGarageCar(S.team)); });
+$('#loading').textContent = 'LOADING…';
+await loadManifest();
+await ensureModel(Q().garage, f => { $('#loading').textContent = `LOADING CAR… ${Math.round(f * 100)}%`; });
 document.fonts?.ready.then(() => { if (S.state === 'menu') { renderTracks(); renderTeams(); } });
 showMenu();
 $('#loading').classList.add('hidden');
@@ -784,7 +824,7 @@ frame();
 
 // test/debug handle
 window.__apex = {
-  S, renderer, camera, garage,
+  S, renderer, camera, garage, step: dt => tick(dt), Q: () => Q(), RES, ASSETS,
   get player() { return player; }, get ais() { return ais; }, get world() { return world; },
   sim(sec, bot) { noRender = true; for (let i = 0; i < sec * 60; i++) { bot && bot(); tick(1 / 60); } noRender = false; }
 };

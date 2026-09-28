@@ -360,5 +360,6 @@ export function makeCar(team, T, { cockpit = false, compound = '#ffd21e', mirror
 }
 
 export function disposeCar(car) {
+  if (car.fromAsset) return; // shares geometry/textures with the loaded model
   car.group.traverse(o => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { if (m.map && !m.map.isRenderTargetTexture && !Object.values(tyreCache).includes(m.map) && m.map.image && m.map.image.width !== 64) m.map.dispose(); m.dispose(); }); });
 }
