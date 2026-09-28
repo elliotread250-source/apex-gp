@@ -166,8 +166,16 @@ function updatePlayer(dt, inp, locked) {
   if (inp.analog) { p.thr = inp.thr; p.brk = inp.brk; }
   else { p.thr += clamp(inp.thr - p.thr, -dt * 10, dt * 6); p.brk += clamp(inp.brk - p.brk, -dt * 10, dt * 9); }
   const target = inp.steer, v = Math.abs(c.vx);
-  if (inp.analog) p.steer = lerp(p.steer, target, Math.min(1, dt * 20));
-  else { const rate = target === 0 ? 7 : (Math.sign(target) !== Math.sign(p.steer) && Math.abs(p.steer) > 0.05 ? 9 : 4.2 / (1 + v / 110)); p.steer += clamp(target - p.steer, -rate * dt, rate * dt); }
+  // keyboard: progressive ramp that slows with speed, so taps are small corrections and holds are full turns
+  if (inp.analog) p.steerRaw = lerp(p.steerRaw || 0, target, Math.min(1, dt * 12));
+  else {
+    const sr = p.steerRaw || 0, speedK = 1 / (1 + v / 25);
+    const rate = target === 0 ? 2.6 + 3 * speedK : (Math.sign(target) !== Math.sign(sr) && Math.abs(sr) > 0.05 ? 5 : 0.55 + 2.8 * speedK);
+    p.steerRaw = sr + clamp(target - sr, -rate * dt, rate * dt);
+  }
+  // curved response: finer control around centre
+  const sa = Math.abs(p.steerRaw);
+  p.steer = Math.sign(p.steerRaw) * (inp.analog ? sa : 0.35 * sa + 0.65 * sa * sa);
 
   // DRS / reverse
   const drsAvail = !!tr.drs[p.idx] && (S.mode === 'tt' || (raceT0 && Math.floor(p.total / tr.L) >= 1));
@@ -221,7 +229,7 @@ function updatePlayer(dt, inp, locked) {
 function resetPlayer() {
   const tr = world.tr, p = player, c = p.c, q = sampleAt(tr, p.s - 5);
   Object.assign(c, { x: q.x, z: q.z, h: Math.atan2(q.tx, q.tz), vx: 0, vy: 0, r: 0, gear: 1, reverse: false });
-  p.steer = 0; p.idx = nearestIdx(tr, c.x, c.z, -1);
+  p.steer = 0; p.steerRaw = 0; p.idx = nearestIdx(tr, c.x, c.z, -1);
   flash('', 'Car reset', 1.2);
 }
 
@@ -526,6 +534,7 @@ const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), camPos = new TH
 const yAxis = new THREE.Vector3(0, 1, 0), xAxis = new THREE.Vector3(1, 0, 0), zAxis = new THREE.Vector3(0, 0, 1);
 let camRoll = 0, camInit = false;
 const chase = { yaw: 0, dist: 5.6 };
+const head = { gLong: 0, gLat: 0, look: 0 };
 function updateCamera(dt) {
   const p = player, c = p.c, g = p.car.group, v = Math.abs(c.vx), t = S.time;
   g.updateMatrixWorld(true);
@@ -535,8 +544,10 @@ function updateCamera(dt) {
   p.shake = Math.max(0, p.shake - dt * 2.5);
   const vib = p.shake * 0.05 + c.bump * 0.006 * Math.min(1, v / 20) + Math.min(v / 95, 1) * 0.0008 + (S.state === 'countdown' ? 0.0006 : 0);
   const jx = (Math.sin(t * 41) + Math.sin(t * 67.3) * 0.6) * vib, jy = (Math.sin(t * 53.7) + Math.sin(t * 89.1) * 0.5) * vib;
-  const gLong = clamp(c.axS / 9.81, -6, 3), gLat = clamp(c.ayS / 9.81, -6, 6);
-  camRoll = lerp(camRoll, clamp(gLat * 0.01, -0.05, 0.05), Math.min(1, dt * 5));
+  head.gLong = lerp(head.gLong, clamp(c.axS / 9.81, -6, 3), Math.min(1, dt * 4));
+  head.gLat = lerp(head.gLat, clamp(c.ayS / 9.81, -6, 6), Math.min(1, dt * 3));
+  const gLong = head.gLong, gLat = head.gLat;
+  camRoll = lerp(camRoll, clamp(gLat * 0.008, -0.04, 0.04), Math.min(1, dt * 3));
   const slip = Math.atan2(c.vy, Math.max(Math.abs(c.vx), 2));
   let fov = S.fov + Math.min(v / 95, 1.1) * 5 + (c.ersOn ? 1.5 : 0);
   if (lookBack) {
@@ -545,8 +556,8 @@ function updateCamera(dt) {
   } else if (S.camMode === 0) {
     const hx = -gLat * 0.01 + jx, hy = 0.9 + jy - Math.max(0, -gLong) * 0.004, hz = -0.46 + clamp(-gLong * 0.008, -0.02, 0.04);
     camera.position.copy(tmpV.set(hx, hy, hz).applyMatrix4(g.matrixWorld));
-    const look = clamp(p.steer * 0.08 + c.r * 0.05 + slip * 0.5, -0.25, 0.25);
-    camera.quaternion.setFromAxisAngle(yAxis, c.h + Math.PI + look);
+    head.look = lerp(head.look, clamp(c.r * 0.06 + slip * 0.35, -0.2, 0.2), Math.min(1, dt * 2.5));
+    camera.quaternion.setFromAxisAngle(yAxis, c.h + Math.PI + head.look);
     tmpQ.setFromAxisAngle(xAxis, -0.02 - Math.max(0, -gLong) * 0.004); camera.quaternion.multiply(tmpQ);
     tmpQ.setFromAxisAngle(zAxis, camRoll); camera.quaternion.multiply(tmpQ);
     camera.near = 0.03;
@@ -558,7 +569,7 @@ function updateCamera(dt) {
   } else {
     const travel = c.h + slip;
     if (!camInit) { chase.yaw = c.h; chase.dist = 5.6; camInit = true; }
-    chase.yaw += wrapAng(lerp(c.h, travel, 0.6) - chase.yaw) * Math.min(1, dt * 6);
+    chase.yaw += wrapAng(lerp(c.h, travel, 0.5) - chase.yaw) * Math.min(1, dt * 4.5);
     chase.dist = lerp(chase.dist, 5.4 + v * 0.018 - clamp(c.axS, -40, 15) * 0.015, Math.min(1, dt * 4));
     camPos.set(c.x - Math.sin(chase.yaw) * chase.dist, 1.55 + v * 0.002, c.z - Math.cos(chase.yaw) * chase.dist);
     camera.position.copy(camPos); camera.position.x += jx * 2; camera.position.y += jy * 2;

@@ -23,7 +23,7 @@ export const COMPOUNDS = {
 export function carSpec(t) {
   return {
     mass: 800,                               // car + driver + some fuel (kg)
-    L: 3.6, a: 1.98, hcg: 0.29, Iz: 1150,    // wheelbase, CG->front axle, CG height, yaw inertia
+    L: 3.6, a: 1.98, hcg: 0.29, Iz: 1350,    // wheelbase, CG->front axle, CG height, yaw inertia
     rw: 0.36,                                // tyre radius
     power: 600e3 + 70e3 * t.accel,           // W at peak (ICE + normal ERS deploy)
     ersPower: 120e3,                         // extra W on overtake

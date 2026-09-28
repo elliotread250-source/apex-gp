@@ -65,7 +65,7 @@ export function speedProfile(tr, spec, skill = 1) {
 // Max steering angle so a keyboard/pad full-lock sits near the tyres' peak slip
 export function steerLimit(spec, v, assist) {
   const vv = Math.max(v, 1), k = maxLatAccel(spec, vv) / (vv * vv);
-  return Math.min(0.38, spec.L * k + PEAK_SLIP * (assist ? 0.75 : 1.3));
+  return Math.min(0.38, spec.L * k + PEAK_SLIP * (assist ? 0.55 : 1.1));
 }
 
 export function createCarPhys(spec, compound) {
@@ -126,7 +126,11 @@ export function stepCar(c, ctl, dt, env) {
   // ---- steering + slip angles (first, so the assists know how much grip cornering is using)
   const delta = ctl.steer * env.steerMax;
   const vxa = Math.max(avx, 1.5);
-  const aF = Math.atan2(vy + a * r, vxa) - delta * sgn, aR = Math.atan2(vy - b * r, vxa);
+  const aF0 = Math.atan2(vy + a * r, vxa) - delta * sgn, aR0 = Math.atan2(vy - b * r, vxa);
+  // tyre relaxation length: cornering force builds over ~0.45 m of rolling, which damps twitchiness
+  const relax = Math.min(1, Math.max(avx, 3) * dt / 0.45);
+  c.aF = (c.aF ?? aF0) + (aF0 - (c.aF ?? aF0)) * relax; c.aR = (c.aR ?? aR0) + (aR0 - (c.aR ?? aR0)) * relax;
+  const aF = c.aF, aR = c.aR;
   const cd = Math.cos(delta), sd = Math.sin(delta);
   const vLatF = (vy + a * r) * cd - vx * sd, vLatR = vy - b * r;
   const fy0F = capF * pac(aF), fy0R = capR * pac(aR);          // pure cornering force
