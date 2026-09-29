@@ -45,6 +45,21 @@
     <div class="seg" id="modeSeg">
       <button data-v="race" class="on">Grand Prix</button>
       <button data-v="tt">Time Trial</button>
+      <button data-v="mp">Multiplayer</button>
+    </div>
+
+    <div id="mpPanel" class="hidden">
+      <h3>Multiplayer</h3>
+      <div class="mpRow"><label>Your name</label><input id="mpName" maxlength="14" autocomplete="off" spellcheck="false"></div>
+      <div id="mpIdle">
+        <div class="mpRow"><button id="mpCreate" class="mpBtn pri">Create room</button><span class="mpOr">or</span><input id="mpCode" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false"><button id="mpJoin" class="mpBtn">Join</button></div>
+        <div class="mpNote">Play with friends: one person creates a room and shares the code (or invite link). Everyone picks their own car below.</div>
+      </div>
+      <div id="mpRoom" class="hidden">
+        <div class="mpRow mpCodeRow">Room code <b id="mpCodeShow"></b><button id="mpCopy" class="mpBtn">Copy invite link</button><button id="mpLeave" class="mpBtn">Leave</button></div>
+        <div id="mpPlayers"></div>
+      </div>
+      <div class="mpNote" id="mpStatus"></div>
     </div>
 
     <h3>Choose your car</h3>
@@ -57,7 +72,7 @@
       <div class="opts">
         <div><h3>Laps</h3><div class="seg" id="lapSeg"><button data-v="1">1</button><button data-v="3" class="on">3</button><button data-v="5">5</button><button data-v="10">10</button></div></div>
         <div><h3>Rivals</h3><div class="seg" id="aiSeg"><button data-v="0.9">Easy</button><button data-v="0.95" class="on">Medium</button><button data-v="1">Hard</button></div></div>
-        <div><h3>Grid size</h3><div class="seg" id="oppSeg"><button data-v="3">4</button><button data-v="7">8</button><button data-v="9" class="on">10</button></div></div>
+        <div><h3>Grid size</h3><div class="seg" id="oppSeg"><button data-v="0" title="Just you: private practice">1</button><button data-v="3">4</button><button data-v="7">8</button><button data-v="9" class="on">10</button></div></div>
       </div>
       <h3>Start from</h3>
       <div class="seg" id="gridSeg"><button data-v="back" class="on">Back of grid</button><button data-v="mid">Midfield</button><button data-v="pole">Pole</button></div>

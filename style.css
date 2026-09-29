@@ -174,3 +174,24 @@ body.touchplay #lights{top:52px}
 #errBox{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:50;width:min(560px,92vw);max-height:86vh;overflow:auto;background:#2a0b0b;border:1px solid #ff5a5a;color:#ffd9d9;padding:14px 16px;border-radius:8px;font:14px/1.45 system-ui,sans-serif}
 #errBox pre{white-space:pre-wrap;word-break:break-word;font-size:11px;background:rgba(0,0,0,.35);padding:8px;margin:8px 0;color:#fff}
 #errBox button{background:#ff5a5a;border:0;color:#fff;padding:8px 16px;border-radius:5px;font-weight:700}
+
+/* ---------- MULTIPLAYER LOBBY ---------- */
+#mpPanel{margin-top:4px}
+.mpRow{display:flex;align-items:center;gap:8px;margin:8px 0;flex-wrap:wrap}
+.mpRow label{font-size:12px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;width:92px}
+#mpPanel input{background:#12121a;border:1px solid var(--line);color:#fff;padding:9px 10px;font:700 15px 'Titillium Web',sans-serif;border-radius:3px;outline:none}
+#mpPanel input:focus{border-color:var(--red)}
+#mpName{flex:1;min-width:140px}
+#mpCode{width:92px;text-transform:uppercase;letter-spacing:3px;text-align:center}
+.mpBtn{background:#23232f;border:1px solid var(--line);color:#fff;padding:9px 14px;font-weight:700;font-size:14px;border-radius:3px}
+.mpBtn.pri{background:var(--red);border-color:var(--red)}
+.mpBtn:disabled{opacity:.5}
+.mpOr{color:var(--dim);font-size:12px}
+.mpCodeRow b{font-size:22px;letter-spacing:4px;color:#fff;margin-right:6px}
+#mpPlayers{display:grid;gap:4px;margin-top:6px}
+#mpPlayers .pl{display:flex;align-items:center;gap:10px;background:#12121a;border:1px solid var(--line);padding:7px 10px;font-weight:700;font-size:14px}
+#mpPlayers .pl i{width:8px;height:22px;border-radius:2px}
+#mpPlayers .pl small{color:var(--dim);font-weight:600;margin-left:auto;font-size:11px;letter-spacing:1px}
+.mpNote{color:var(--dim);font-size:12px;line-height:1.5;margin-top:6px}
+.mpNote.err{color:#ff8080}
+.go:disabled{filter:grayscale(1) brightness(.6);cursor:default}
