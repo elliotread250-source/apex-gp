@@ -170,3 +170,7 @@ body.touchplay #lights{top:52px}
   #brkBtn{width:78px;height:78px} #thrBtn{width:92px;height:124px} #auxBtns{bottom:102px;right:calc(max(14px,env(safe-area-inset-right)) + 104px)}
   .card{padding:16px 18px} .card h2{font-size:24px}
 }
+
+#errBox{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:50;width:min(560px,92vw);max-height:86vh;overflow:auto;background:#2a0b0b;border:1px solid #ff5a5a;color:#ffd9d9;padding:14px 16px;border-radius:8px;font:14px/1.45 system-ui,sans-serif}
+#errBox pre{white-space:pre-wrap;word-break:break-word;font-size:11px;background:rgba(0,0,0,.35);padding:8px;margin:8px 0;color:#fff}
+#errBox button{background:#ff5a5a;border:0;color:#fff;padding:8px 16px;border-radius:5px;font-weight:700}

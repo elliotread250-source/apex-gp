@@ -41,6 +41,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.shadowMap.autoUpdate = false; // updated once per frame, not again for the mirror pass
 document.body.prepend(renderer.domElement);
+renderer.domElement.addEventListener('webglcontextlost', e => { e.preventDefault(); window.__showError?.('The graphics chip ran out of memory (WebGL context lost). Choose Graphics: Low and reload.'); });
 setAniso(renderer.capabilities.getMaxAnisotropy());
 const T = buildTextures();
 

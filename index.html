@@ -11,6 +11,22 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:ital,wght@0,400;0,600;0,700;0,900;1,900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<script>
+// On-screen error reporting (plain script, so it works even if the game's modules fail to load)
+(function () {
+  function show(msg) {
+    var b = document.getElementById('errBox');
+    if (!b) { b = document.createElement('div'); b.id = 'errBox'; (document.body || document.documentElement).appendChild(b); }
+    b.innerHTML = '<b>Something went wrong starting the game.</b><br>Please send a screenshot of this box.<pre></pre><button onclick="location.reload()">Reload</button>';
+    b.querySelector('pre').textContent = String(msg).slice(0, 600) + '\n\n' + navigator.userAgent;
+  }
+  window.__showError = show;
+  addEventListener('error', function (e) { show((e.message || 'Error') + (e.filename ? '\n' + e.filename.split('/').pop() + ':' + e.lineno : '')); });
+  addEventListener('unhandledrejection', function (e) { show('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+  setTimeout(function () { if (!window.__apex) show('The game did not finish loading after 30 seconds (slow connection, or this browser is too old).'); }, 30000);
+})();
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
 "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
