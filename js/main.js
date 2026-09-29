@@ -3,7 +3,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { $, clamp, lerp, wrapAng, fmt, store } from './util.js';
 import { TEAMS, TRACKS, COMPOUNDS, carSpec } from './data.js';
 import { buildTextures, setAniso } from './textures.js';
-import { makeCar, disposeCar } from './carModel.js';
+import { makeCar, disposeCar, makeSteeringWheel } from './carModel.js';
 import { buildWorld, sampleAt, gridPose, nearestIdx, surfaceAt, disposeScene } from './track.js';
 import { SURF, createCarPhys, stepCar, steerLimit, speedProfile, createAI, aiAccel, maxLatAccel, topSpeed } from './physics.js';
 import { createPost, createFX, createMirror } from './fx.js';
@@ -172,6 +172,11 @@ function startSession(netCfg) {
 function newPlayer(tr, team, gp) {
   const spec = carSpec(team), cmp = COMPOUNDS[S.tyre];
   const car = hasModel(Q().player) ? carFromAsset(team, Q().player) : makeCar(team, T, { cockpit: true, compound: cmp.color, mirrorTex: Q().mirror ? mirror.rt.texture : null });
+  if (car.fromAsset) { // put a working steering wheel and the driver's hands in the real car's cockpit
+    const sw = makeSteeringWheel(T, team), w = ASSETS.cfg.wheel || { pos: [0, 0.66, 0.26], tilt: -0.32, scale: 0.9 };
+    sw.wheel.position.set(...w.pos); sw.wheel.rotation.x = w.tilt; sw.wheel.scale.setScalar(w.scale);
+    car.group.add(sw.wheel); Object.assign(car, sw);
+  }
   world.scene.add(car.group);
   const c = createCarPhys(spec, cmp);
   c.x = gp.x; c.z = gp.z; c.h = gp.h;
@@ -675,6 +680,7 @@ function updateCamera(dt) {
   const lookBack = keys.has('KeyB'), cockpit = S.camMode === 0 && !lookBack;
   p.car.helmet.visible = p.car.visor.visible = !cockpit;
   p.car.pillar.visible = !(cockpit && S.hidePillar);
+  document.body.classList.toggle('cockpitcam', cockpit && !!p.car.wheel);
   p.shake = Math.max(0, p.shake - dt * 2.5);
   const vib = p.shake * 0.05 + c.bump * 0.006 * Math.min(1, v / 20) + Math.min(v / 95, 1) * 0.0008 + (S.state === 'countdown' ? 0.0006 : 0);
   const jx = (Math.sin(t * 41) + Math.sin(t * 67.3) * 0.6) * vib, jy = (Math.sin(t * 53.7) + Math.sin(t * 89.1) * 0.5) * vib;

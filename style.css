@@ -195,3 +195,6 @@ body.touchplay #lights{top:52px}
 .mpNote{color:var(--dim);font-size:12px;line-height:1.5;margin-top:6px}
 .mpNote.err{color:#ff8080}
 .go:disabled{filter:grayscale(1) brightness(.6);cursor:default}
+
+/* in the cockpit the steering wheel display shows speed/gear/LEDs, so hide the duplicate dash (kept on touch screens) */
+body.cockpitcam:not(.touchplay) #dash{display:none}

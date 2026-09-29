@@ -331,30 +331,9 @@ export function makeCar(team, T, { cockpit = false, compound = '#ffd21e', mirror
   g.children.forEach(ch => { if (ch.isMesh && (G.fw.includes(ch.geometry) || ch.geometry === G.fwEnd || ch.geometry === G.fwFoot)) out.frontWing.push(ch); });
 
   if (cockpit) {
-    const wheel = new THREE.Group(); wheel.position.set(0, 0.7, 0.1); wheel.rotation.x = -0.3; wheel.scale.setScalar(0.85); g.add(wheel);
-    const wb = new THREE.Shape();
-    wb.moveTo(-0.13, -0.06); wb.quadraticCurveTo(-0.16, 0.0, -0.13, 0.07); wb.lineTo(0.13, 0.07); wb.quadraticCurveTo(0.16, 0, 0.13, -0.06); wb.quadraticCurveTo(0, -0.085, -0.13, -0.06);
-    const wg = new THREE.ExtrudeGeometry(wb, { depth: 0.035, bevelEnabled: true, bevelThickness: 0.008, bevelSize: 0.008, bevelSegments: 2 }); wg.translate(0, 0, -0.0175);
-    add(wg, carbon, 0, 0, 0, 0, 0, 0, wheel);
-    for (const s of [-1, 1]) {
-      add(new THREE.CapsuleGeometry(0.028, 0.1, 4, 10), new THREE.MeshStandardMaterial({ color: '#202022', roughness: 0.95 }), s * 0.15, 0, 0, 0, 0, s * 0.22, wheel);
-      add(new THREE.BoxGeometry(0.05, 0.012, 0.01), metal, s * 0.1, -0.04, 0.03, 0, 0, 0, wheel); // shift paddles
-    }
-    ['#e10600', '#ffd21e', '#2f8cff', '#1ee36b', '#ffffff', '#ff8000'].forEach((c, i) => add(new THREE.CylinderGeometry(0.008, 0.008, 0.01, 10), new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.2 }), (i % 2 ? 1 : -1) * (0.095 + (i >> 1) * 0.012), -0.03 + (i >> 1) * 0.022, -0.028, Math.PI / 2, 0, 0, wheel));
-    for (const s of [-1, 1]) add(new THREE.CylinderGeometry(0.012, 0.012, 0.012, 12), metal, s * 0.075, -0.055, -0.026, Math.PI / 2, 0, 0, wheel); // rotary dials
-    const dc = document.createElement('canvas'); dc.width = 256; dc.height = 128;
-    const dtex = new THREE.CanvasTexture(dc); dtex.colorSpace = THREE.SRGBColorSpace;
-    const disp = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.07), new THREE.MeshBasicMaterial({ map: dtex, toneMapped: false }));
-    disp.position.set(0, 0.005, -0.028); disp.rotation.y = Math.PI; wheel.add(disp);
-    const ledMats = [];
-    for (let i = 0; i < 10; i++) {
-      const m = new THREE.MeshBasicMaterial({ color: '#111', toneMapped: false }); ledMats.push(m);
-      const led = new THREE.Mesh(new THREE.CircleGeometry(0.0055, 10), m); led.position.set(0.063 - i * 0.014, 0.056, -0.028); led.rotation.y = Math.PI; wheel.add(led);
-    }
-    // gloves on the wheel
-    const glove = new THREE.MeshStandardMaterial({ color: '#1a1a1c', roughness: 0.9 });
-    for (const s of [-1, 1]) add(new THREE.SphereGeometry(0.03, 12, 10), glove, s * 0.15, 0.0, -0.035, 0, 0, 0, wheel).scale.set(0.9, 1.4, 0.8);
-    Object.assign(out, { wheel, dispCanvas: dc, dispTex: dtex, ledMats });
+    const sw = makeSteeringWheel(T, team);
+    sw.wheel.position.set(0, 0.7, 0.1); sw.wheel.rotation.x = -0.3; sw.wheel.scale.setScalar(0.85); g.add(sw.wheel);
+    Object.assign(out, sw);
   }
   return out;
 }
@@ -362,4 +341,44 @@ export function makeCar(team, T, { cockpit = false, compound = '#ffd21e', mirror
 export function disposeCar(car) {
   if (car.fromAsset) return; // shares geometry/textures with the loaded model
   car.group.traverse(o => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { if (m.map && !m.map.isRenderTargetTexture && !Object.values(tyreCache).includes(m.map) && m.map.image && m.map.image.width !== 64) m.map.dispose(); m.dispose(); }); });
+}
+
+// Steering wheel with live display, shift LEDs, buttons, paddles, and the driver's gloved hands/forearms.
+export function makeSteeringWheel(T, team) {
+  const wheel = new THREE.Group();
+  const carbon = new THREE.MeshPhysicalMaterial({ color: '#9a9a9a', map: T.carbon, roughness: 0.4, metalness: 0.2, clearcoat: 0.5, envMapIntensity: 0.3 });
+  const metal = new THREE.MeshStandardMaterial({ color: '#9aa0a6', roughness: 0.3, metalness: 1 });
+  const add = (geo, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, parent = wheel) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); parent.add(m); return m; };
+  const wb = new THREE.Shape();
+  wb.moveTo(-0.13, -0.06); wb.quadraticCurveTo(-0.16, 0.0, -0.13, 0.07); wb.lineTo(0.13, 0.07); wb.quadraticCurveTo(0.16, 0, 0.13, -0.06); wb.quadraticCurveTo(0, -0.085, -0.13, -0.06);
+  const wg = new THREE.ExtrudeGeometry(wb, { depth: 0.035, bevelEnabled: true, bevelThickness: 0.008, bevelSize: 0.008, bevelSegments: 2 }); wg.translate(0, 0, -0.0175);
+  add(wg, carbon);
+  const grip = new THREE.MeshStandardMaterial({ color: '#202022', roughness: 0.95 });
+  for (const s of [-1, 1]) {
+    add(new THREE.CapsuleGeometry(0.028, 0.1, 4, 10), grip, s * 0.15, 0, 0, 0, 0, s * 0.22);
+    add(new THREE.BoxGeometry(0.05, 0.012, 0.01), metal, s * 0.1, -0.04, 0.03); // shift paddles
+  }
+  ['#e10600', '#ffd21e', '#2f8cff', '#1ee36b', '#ffffff', '#ff8000'].forEach((c, i) => add(new THREE.CylinderGeometry(0.008, 0.008, 0.01, 10), new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.25 }), (i % 2 ? 1 : -1) * (0.095 + (i >> 1) * 0.012), -0.03 + (i >> 1) * 0.022, -0.028, Math.PI / 2));
+  for (const s of [-1, 1]) add(new THREE.CylinderGeometry(0.012, 0.012, 0.012, 12), metal, s * 0.075, -0.055, -0.026, Math.PI / 2);
+  const dc = document.createElement('canvas'); dc.width = 256; dc.height = 128;
+  const dtex = new THREE.CanvasTexture(dc); dtex.colorSpace = THREE.SRGBColorSpace;
+  const disp = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.07), new THREE.MeshBasicMaterial({ map: dtex, toneMapped: false }));
+  disp.position.set(0, 0.005, -0.028); disp.rotation.y = Math.PI; wheel.add(disp);
+  const ledMats = [];
+  for (let i = 0; i < 10; i++) {
+    const m = new THREE.MeshBasicMaterial({ color: '#111', toneMapped: false }); ledMats.push(m);
+    const led = new THREE.Mesh(new THREE.CircleGeometry(0.0055, 10), m); led.position.set(0.063 - i * 0.014, 0.056, -0.028); led.rotation.y = Math.PI; wheel.add(led);
+  }
+  // gloves wrapped round the grips, forearms in race-suit colour running back towards the driver
+  const glove = new THREE.MeshStandardMaterial({ color: '#16161a', roughness: 0.85 });
+  const suit = new THREE.MeshStandardMaterial({ color: team.c1, roughness: 0.8 });
+  for (const s of [-1, 1]) {
+    add(new THREE.SphereGeometry(0.034, 14, 12), glove, s * 0.152, 0.004, -0.02).scale.set(0.95, 1.55, 0.9);
+    add(new THREE.SphereGeometry(0.018, 10, 8), glove, s * 0.128, 0.03, -0.03); // thumb
+    const arm = add(new THREE.CapsuleGeometry(0.036, 0.26, 4, 12), suit, s * 0.2, -0.06, -0.17);
+    arm.rotation.set(1.15, 0, -s * 0.35);
+    add(new THREE.CylinderGeometry(0.04, 0.04, 0.05, 12), glove, s * 0.168, -0.018, -0.06, 1.15, 0, -s * 0.35); // glove cuff
+  }
+  wheel.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; } });
+  return { wheel, dispCanvas: dc, dispTex: dtex, ledMats };
 }
