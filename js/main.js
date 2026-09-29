@@ -4,7 +4,8 @@ import { $, clamp, lerp, wrapAng, fmt, store } from './util.js';
 import { TEAMS, TRACKS, COMPOUNDS, carSpec } from './data.js';
 import { buildTextures, setAniso } from './textures.js';
 import { makeCar, disposeCar, makeSteeringWheel, createDriverArms } from './carModel.js';
-import { buildWorld, sampleAt, gridPose, nearestIdx, surfaceAt, disposeScene } from './track.js';
+import { buildWorld, sampleAt, gridPose, nearestIdx, surfaceAt, disposeScene, paintGarages } from './track.js';
+import { createCrew } from './pit.js';
 import { SURF, createCarPhys, stepCar, steerLimit, speedProfile, createAI, aiAccel, maxLatAccel, topSpeed } from './physics.js';
 import { createPost, createFX, createMirror } from './fx.js';
 import { audio } from './audio.js';
@@ -151,6 +152,8 @@ function startSession(netCfg) {
   $('#hud').classList.remove('hidden');
   setTouchActive(S.input === 'mobile');
   $('#tower').classList.toggle('hidden', !RACE());
+  { const pg = trk.pit.garages, pi = pg.indexOf(trk.pit.playerGarage), order = pg.map((_, k) => (k * 3 + 1) % TEAMS.length);
+    order[pi] = TEAMS.indexOf(player.team); paintGarages(trk, order, TEAMS); trk.pit.boxMat.color.set(player.team.c1); }
   buildLeds(); prepMinimap();
   const cmp = COMPOUNDS[S.tyre];
   $('#cmp').textContent = cmp.key; $('#cmp').style.borderColor = cmp.color;
@@ -330,19 +333,29 @@ function updatePlayer(dt, inp, locked) {
     c.rpm = lerp(c.rpm, 4000 + p.thr * 7500 + (p.thr > 0.5 ? Math.sin(S.time * 30) * 250 : 0), Math.min(1, dt * 8));
     return;
   }
+  if (p.pitStop) { updatePitStop(dt); return; }
   const full = S.assists === 'full';
-  stepCar(c, { thr: p.thr, brk: p.brk, steer: p.steer, ers: inp.ers }, dt, {
+  const pitR = tr.pit.rel(p.s), inPitZone = tr.pit.inZone(pitR);
+  p.inPitLane = inPitZone && p.lat > tr.halfW + 0.6;
+  const limiting = p.inPitLane && tr.pit.limiterOn(pitR);
+  p.limiter = limiting;
+  stepCar(c, { thr: limiting && c.vx > 22.1 ? 0 : p.thr, brk: p.brk, steer: p.steer, ers: limiting ? false : inp.ers }, dt, {
     muW, drag, auto: !S.manual, abs: full, tc: S.assists !== 'off',
     steerMax: steerLimit(spec, v, full) * (inp.analogSteer ? 1.1 : 1)
   });
   if (c.shifted) { audio.shift(); c.shifted = 0; }
+  if (limiting && c.vx > 22.4) c.vx = Math.max(22.4, c.vx - 35 * dt);
+  // pit lane: crew waits in the box; stop there to trigger the stop
+  if (p.inPitLane && !p.pitStop && !p.pitDone && Math.abs(pitR - tr.pit.boxRel) < 3.6 && Math.abs(p.lat - tr.pit.boxLat) < 2.4 && Math.abs(c.vx) < 2.5) startPitStop();
+  if (!inPitZone) { p.pitDone = false; if (p.crew) removeCrew(); p.pitMsg = false; }
+  else if (!p.crew && p.lat > tr.halfW) addCrew();
+  if (p.inPitLane && !p.pitMsg) { p.pitMsg = true; flash('PIT LANE', touch.active ? 'Limiter 80 km/h · stop in your box for fresh tyres' : 'Limiter 80 km/h · stop in your box · tyres: 1 Soft  2 Medium  3 Hard', 3); }
 
   // walls
   const nlat = (c.x - P0.x) * N0.x + (c.z - P0.z) * N0.z;
   const ext = Math.abs(sr) * 2.4 + Math.abs(cr) * 0.95;
-  const wallLim = tr.wallD - ext;
-  if (Math.abs(nlat) > wallLim) {
-    const sg = Math.sign(nlat), pen = Math.abs(nlat) - wallLim;
+  const wL = tr.wallL[p.idx] - ext, wR = tr.wallR[p.idx] - ext;
+  const wallHit = (sg, pen) => {
     const nx = -N0.x * sg, nz = -N0.z * sg; // points back into the track
     c.x += nx * pen; c.z += nz * pen;
     const sh = Math.sin(c.h), ch = Math.cos(c.h);
@@ -361,11 +374,56 @@ function updatePlayer(dt, inp, locked) {
       if (hit > 9) { c.damage = Math.min(1, c.damage + (hit - 9) / 28); if (c.damage > 0.35 && !p.wingGone) { p.wingGone = true; p.car.frontWing.forEach(m => m.visible = false); flash('', 'FRONT WING DAMAGE', 2.5, 'warn'); } }
       for (let i = 0; i < Math.min(30, hit * 2); i++) fx.sparks.emit(c.x - nx * 1, 0.4, c.z - nz * 1, Vx * 0.5 + (Math.random() - .5) * 6, Math.random() * 4, Vz * 0.5 + (Math.random() - .5) * 6, 0.4, 0.12, 0, 1, 1, 0.8, 0.4);
     }
+  };
+  if (nlat > wL) wallHit(1, nlat - wL);
+  else if (-nlat > wR) wallHit(-1, -nlat - wR);
+  if (inPitZone && tr.pit.wallOn(pitR)) { // concrete wall between the track and the pit lane
+    const pw = tr.pit.wall, half = ext * 0.9 + 0.25;
+    if (nlat < pw && nlat > pw - half) wallHit(1, nlat - (pw - half));
+    else if (nlat >= pw && nlat < pw + half) wallHit(-1, pw + half - nlat);
   }
-  if (Math.abs(nlat) > tr.wallD + 8) resetPlayer();
+  if (nlat > tr.wallL[p.idx] + 8 || -nlat > tr.wallR[p.idx] + 8) resetPlayer();
   p.wrongWay = (Math.abs(rel) > 2.0 && c.vx > 4) ? p.wrongWay + dt : 0;
   p.stuck = (Math.abs(c.vx) < 1.5 && p.thr > 0.5) ? (p.stuck || 0) + dt : 0;
 }
+
+// ---------------- pit stops ----------------
+function addCrew() {
+  const p = player, tr = world.tr, pit = tr.pit;
+  p.crew = createCrew(p.team, (COMPOUNDS[p.nextTyre || S.tyre] || COMPOUNDS.medium).color);
+  const q = sampleAt(tr, pit.entry + pit.boxRel);
+  p.crew.group.position.set(q.x + q.nx * pit.boxLat, 0, q.z + q.nz * pit.boxLat); p.crew.group.rotation.y = Math.atan2(q.tx, q.tz);
+  p.crew.reset(); world.scene.add(p.crew.group);
+}
+function removeCrew() { const p = player; world.scene.remove(p.crew.group); disposeScene(p.crew.group); p.crew = null; }
+function startPitStop() {
+  const p = player, c = p.c, tr = world.tr, pit = tr.pit;
+  if (!p.crew) addCrew();
+  const q = sampleAt(tr, pit.entry + pit.boxRel);             // settle exactly on the marks
+  Object.assign(c, { x: q.x + q.nx * pit.boxLat, z: q.z + q.nz * pit.boxLat, h: Math.atan2(q.tx, q.tz), vx: 0, vy: 0, r: 0, gear: 1, reverse: false });
+  const repair = c.damage > 0.2;
+  p.pitStop = { t: 0, dur: 1.9 + Math.random() * 0.7 + (repair ? 1.8 : 0), repair, swapped: false, entered: S.time };
+  audio.thud(0.3); flash('BOX BOX', repair ? 'Changing tyres and the front wing' : 'Changing tyres', 1.5);
+  p.pitCount = (p.pitCount || 0) + 1;
+  onPitStopStart?.();
+}
+function updatePitStop(dt) {
+  const p = player, c = p.c, ps = p.pitStop;
+  ps.t += dt; c.vx = c.vy = c.r = 0; c.rpm = lerp(c.rpm, 5200 + Math.sin(S.time * 7) * 300, Math.min(1, dt * 6));
+  if (!ps.swapped && ps.t > ps.dur * 0.6) {
+    ps.swapped = true;
+    const cmp = COMPOUNDS[p.nextTyre || S.tyre] || COMPOUNDS.medium;
+    Object.assign(c, { compound: cmp, wear: 0, tyreT: [75, 75, 75, 75] });
+    $('#cmp').textContent = cmp.key; $('#cmp').style.borderColor = cmp.color;
+    if (ps.repair) { c.damage = 0; if (p.wingGone) { p.wingGone = false; p.car.frontWing.forEach(m => m.visible = true); } }
+  }
+  if (ps.t >= ps.dur) {
+    const stopT = ps.dur; p.pitStop = null; p.pitDone = true; p.lastPitT = stopT; p.releasedAt = S.time;
+    flash('GO GO GO', `Pit stop ${stopT.toFixed(1)} s · fresh ${(p.nextTyre || S.tyre).toUpperCase()} tyres`, 2.2); audio.beep(900, 0.2);
+    onPitStopEnd?.(stopT);
+  }
+}
+let onPitStopStart = null, onPitStopEnd = null;
 
 function resetPlayer() {
   const tr = world.tr, p = player, c = p.c, q = sampleAt(tr, p.s - 5);
@@ -575,7 +633,7 @@ function updateHUD(dt) {
   $('#drsPill').className = 'pill' + (c.drsOpen ? ' act' : p.drsAvail ? ' avail' : '');
   $('#ersPill').className = 'pill' + (c.ersOn ? ' act' : c.harvest ? ' avail' : '');
   $('#ersBar b').style.width = (c.ers * 100) + '%';
-  $('#gbTxt').textContent = S.manual ? 'MANUAL' : 'AUTO';
+  $('#gbTxt').textContent = p.limiter ? 'PIT LIMITER' : S.manual ? 'MANUAL' : 'AUTO';
   const cur = S.state === 'countdown' ? 0 : (S.mode === 'tt' && p.maxLap < 0 ? null : S.time - p.lapStart);
   $('#tCur').textContent = cur == null ? 'OUT LAP' : fmt(cur);
   $('#tLast').textContent = fmt(p.last);
@@ -637,6 +695,12 @@ function syncPlayerCar(dt) {
   car.drsFlap.rotation.x = c.drsOpen ? -0.75 : 0;
   if (car.wheel) car.wheel.rotation.z = -p.steer * 1.6;
   if (car.arms) { g.updateMatrixWorld(true); car.arms.update(car.wheel, g); }
+  if (p.crew) {
+    const ps = p.pitStop, released = !ps && p.releasedAt && S.time - p.releasedAt < 1.2;
+    const r = ps ? p.crew.update(ps.t, ps.dur, false) : p.crew.update(released ? 1 : 0, 1, released);
+    g.position.y += ps ? r.lift : 0;
+    car.spins.forEach((sp, i) => { const h = sp.parent; if (!h.userData.base) h.userData.base = h.position.clone(); h.position.x = h.userData.base.x + Math.sign(h.userData.base.x) * (ps ? r.off[i] || 0 : 0); });
+  }
   car.rain.material.emissiveIntensity = c.harvest ? (Math.floor(S.time * 8) % 2 ? 4 : 0.3) : 0.4;
 }
 function syncAI(a, dt) {
@@ -682,7 +746,8 @@ const head = { gLong: 0, gLat: 0, look: 0 };
 function updateCamera(dt) {
   const p = player, c = p.c, g = p.car.group, v = Math.abs(c.vx), t = S.time;
   g.updateMatrixWorld(true);
-  const lookBack = keys.has('KeyB'), cockpit = S.camMode === 0 && !lookBack;
+  const pitCam = !!p.pitStop;
+  const lookBack = keys.has('KeyB'), cockpit = S.camMode === 0 && !lookBack && !pitCam;
   p.car.helmet.visible = p.car.visor.visible = !cockpit;
   p.car.pillar.visible = !(cockpit && S.hidePillar);
   document.body.classList.toggle('cockpitcam', cockpit && !!p.car.wheel);
@@ -696,7 +761,11 @@ function updateCamera(dt) {
   camRoll = lerp(camRoll, clamp(gLat * 0.008, -0.04, 0.04), Math.min(1, dt * 3));
   const slip = Math.atan2(c.vy, Math.max(Math.abs(c.vx), 2));
   let fov = S.fov + Math.min(v / 95, 1.1) * 5 + (c.ersOn ? 1.5 : 0);
-  if (lookBack) {
+  if (pitCam) {
+    const sh = Math.sin(c.h), ch = Math.cos(c.h), nx = ch, nz = -sh; // car's left (the garage side)
+    camera.position.set(c.x - nx * 4.2 + sh * 6.8, 4.3, c.z - nz * 4.2 + ch * 6.8); // elevated TV angle from the pit-wall side
+    camera.lookAt(c.x - sh * 0.3, 0.45, c.z - ch * 0.3); camera.near = 0.1; fov = 55;
+  } else if (lookBack) {
     camera.position.copy(tmpV.set(0, 1.15, -2.9).applyMatrix4(g.matrixWorld));
     camera.quaternion.setFromAxisAngle(yAxis, c.h); camera.near = 0.05; fov = 62;
   } else if (S.camMode === 0) {
@@ -762,6 +831,7 @@ function tick(dt) {
     if (pressed.has('KeyR') && S.state === 'race' && !player.finished) resetPlayer();
     if (pressed.has('BracketLeft') || pressed.has('BracketRight')) { S.fov = clamp(S.fov + (pressed.has('BracketRight') ? 4 : -4), 46, 90); saveSettings(); flash('', 'Field of view ' + S.fov + '°', 1); }
     if (pressed.has('Space')) { S.hidePillar = !S.hidePillar; saveSettings(); flash('', S.hidePillar ? 'Halo pillar hidden' : 'Halo pillar shown', 1); }
+    if (player.inPitLane) for (const [k, t] of [['Digit1', 'soft'], ['Digit2', 'medium'], ['Digit3', 'hard']]) if (pressed.has(k)) { player.nextTyre = t; flash('', 'Next tyres: ' + t.toUpperCase(), 1.4); }
     if (pressed.has('KeyG')) { S.manual = !S.manual; saveSettings(); flash('', S.manual ? 'Manual gearbox — X up, Z down' : 'Automatic gearbox', 1.5); }
     const c = player.c;
     if (S.manual && !c.reverse) {

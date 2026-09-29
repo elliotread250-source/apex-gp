@@ -38,6 +38,23 @@ export function buildTrack(def) {
   const tr = { def, curve, L, N, ds, P, T, NL, k, kS, line, drs, halfW, street,
     kerbW: street ? 1.0 : 1.5, wallD: halfW + def.runoff + (street ? 0 : 1.5) };
   tr.kerb = new Uint8Array(N); for (let i = 0; i < N; i++) tr.kerb[i] = Math.abs(kS[i]) > 0.006 ? 1 : 0;
+  // ---- pit lane on the left of the main straight: entry ramp, lane behind a pit wall, garages, exit ramp
+  const pd = def.pit || { entry: -300, exit: 200 };
+  const pit = tr.pit = { entry: pd.entry, len: pd.exit - pd.entry, lane: halfW + 6.2, laneHalf: 3.2, wall: halfW + 1.9, ramp: 70,
+    garageIn: halfW + 10.2, garageOut: halfW + 18, outerWall: halfW + 19.5 };
+  pit.rel = s => (((s - pit.entry) % L) + L) % L;                     // distance along the pit zone from its entry
+  pit.relI = i => pit.rel(i * ds);
+  pit.inZone = r => r <= pit.len;
+  pit.laneLat = r => { const sm = t => t * t * (3 - 2 * t);
+    if (r < pit.ramp) return lerp(halfW - 1.2, pit.lane, sm(r / pit.ramp));
+    if (r > pit.len - pit.ramp) return lerp(pit.lane, halfW - 1.2, sm((r - (pit.len - pit.ramp)) / pit.ramp));
+    return pit.lane; };
+  pit.wallOn = r => r > pit.ramp + 5 && r < pit.len - pit.ramp - 5;
+  pit.boxRel = pit.len * 0.52; pit.boxLat = pit.lane + 1.3;
+  pit.limiterOn = r => r > pit.ramp - 10 && r < pit.len - pit.ramp + 10;
+  const baseWall = halfW + def.runoff + (street ? 0 : 1.5);
+  tr.wallR = new Float32Array(N).fill(baseWall); tr.wallL = new Float32Array(N).fill(baseWall);
+  for (let i = 0; i < N; i++) if (pit.inZone(pit.relI(i))) tr.wallL[i] = Math.max(baseWall, pit.outerWall);
   // corners -> run-off areas on the outside (1 = painted asphalt, 2 = gravel)
   tr.runL = new Uint8Array(N); tr.runR = new Uint8Array(N); tr.corners = [];
   const isC = i => Math.abs(kS[i]) > 0.0045;
@@ -47,7 +64,7 @@ export function buildTrack(def) {
     if (n < N && isC(i)) { if (!cur) cur = { i0: i, len: 0, kmax: 0, sgn: 0 }; cur.len++; cur.kmax = Math.max(cur.kmax, Math.abs(kS[i])); cur.sgn += kS[i]; }
     else if (cur) { cur.i1 = (cur.i0 + cur.len) % N; cur.sgn = Math.sign(cur.sgn); tr.corners.push(cur); cur = null; }
   }
-  if (!street) tr.corners.forEach((c, ci) => {
+  if (!street) tr.corners.forEach((c, ci) => { if (c.sgn < 0 && pit.inZone(pit.relI(c.i0))) return;
     const type = c.kmax > 0.011 ? 2 : (ci % 3 === 0 ? 2 : 1);
     const arr = c.sgn > 0 ? tr.runR : tr.runL;   // outside of a left-hander is the right side
     for (let j = -12; j < c.len + 55; j++) arr[(c.i0 + j + N) % N] = type;
@@ -88,6 +105,7 @@ export function nearestIdx(tr, x, z, hint) {
 export function surfaceAt(tr, i, lat) {
   const a = Math.abs(lat);
   if (a <= tr.halfW) return 'road';
+  if (lat > 0) { const r = tr.pit.relI(i); if (tr.pit.inZone(r) && lat <= tr.pit.laneLat(r) + tr.pit.laneHalf + 0.3) return 'road'; }
   if (tr.kerb[i] && a <= tr.halfW + tr.kerbW) return 'kerb';
   if (tr.street) return 'road';
   const run = lat > 0 ? tr.runL[i] : tr.runR[i];
@@ -192,7 +210,7 @@ export function buildWorld(def, T, renderer, { Q, profile = null } = {}) {
   }
   if (tr.street) {
     const walk = std({ color: '#a7a39a', roughness: 0.9, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-    for (const s of [1, -1]) scene.add(new THREE.Mesh(ribbon(tr, s * tr.wallD, s * tr.halfW, 0.04, 0.04, { vScale: 4 }), walk));
+    for (const s of [1, -1]) scene.add(new THREE.Mesh(ribbon(tr, j => s * (s > 0 ? tr.wallL[j] : tr.wallR[j]), s * tr.halfW, 0.04, 0.04, { vScale: 4 }), walk));
   } else {
     // painted asphalt run-off and gravel traps on corner exits
     const off = { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
@@ -211,17 +229,18 @@ export function buildWorld(def, T, renderer, { Q, profile = null } = {}) {
   const fenceM = new THREE.MeshStandardMaterial({ map: T.fence, alphaTest: 0.4, transparent: false, side: THREE.DoubleSide, metalness: 0.6, roughness: 0.5 });
   fenceM.map = T.fence.clone(); fenceM.map.needsUpdate = true; fenceM.map.repeat.set(1, 4);
   for (const s of [1, -1]) {
-    const w = new THREE.Mesh(ribbon(tr, s * tr.wallD, s * tr.wallD, 0, 1.1, { vScale: 48, alongU: true, flip: s > 0 }), adM);
+    const wd = j => s * (s > 0 ? tr.wallL[j] : tr.wallR[j]), wdo = (j, o) => s * ((s > 0 ? tr.wallL[j] : tr.wallR[j]) + o);
+    const w = new THREE.Mesh(ribbon(tr, wd, wd, 0, 1.1, { vScale: 48, alongU: true, flip: s > 0 }), adM);
     w.castShadow = true; w.receiveShadow = true; scene.add(w);
-    scene.add(new THREE.Mesh(ribbon(tr, s * (tr.wallD + 0.12), s * (tr.wallD + 0.12), 1.1, 1.45, { vScale: 10 }), railM));
-    if (!tr.street) scene.add(new THREE.Mesh(ribbon(tr, s * (tr.wallD + 0.35), s * (tr.wallD + 0.35), 1.45, 4.6, { vScale: 1.5, alongU: true }), fenceM));
+    scene.add(new THREE.Mesh(ribbon(tr, j => wdo(j, 0.12), j => wdo(j, 0.12), 1.1, 1.45, { vScale: 10 }), railM));
+    if (!tr.street) scene.add(new THREE.Mesh(ribbon(tr, j => wdo(j, 0.35), j => wdo(j, 0.35), 1.45, 4.6, { vScale: 1.5, alongU: true }), fenceM));
   }
   if (!tr.street) {
     const postGeo = new THREE.CylinderGeometry(0.06, 0.06, 4.8, 6), n = Math.floor(tr.L / 6) * 2;
     const posts = new THREE.InstancedMesh(postGeo, std({ color: '#6d7278', metalness: 0.7, roughness: 0.4 }), n);
     const m4 = new THREE.Matrix4(); let k = 0;
     for (let s = 0; s < tr.L - 3; s += 6) for (const side of [1, -1]) {
-      const p = sampleAt(tr, s), off = side * (tr.wallD + 0.4);
+      const p = sampleAt(tr, s), off = side * ((side > 0 ? tr.wallL[p.i] : tr.wallR[p.i]) + 0.4);
       m4.makeTranslation(p.x + p.nx * off, 2.4, p.z + p.nz * off); posts.setMatrixAt(k++, m4);
     }
     posts.count = k; scene.add(posts);
@@ -244,8 +263,9 @@ export function buildWorld(def, T, renderer, { Q, profile = null } = {}) {
     const p = tr.P[Math.round(8 / tr.ds)], t = tr.T[0], n = tr.NL[0], h = Math.atan2(t.x, t.z);
     const gm = std({ color: '#1b1b20', metalness: 0.5, roughness: 0.5 });
     const span = tr.wallD * 2 + 2;
-    for (const s of [1, -1]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.6, 8, 0.6), gm); post.position.set(p.x + n.x * s * (tr.wallD + 1), 4, p.z + n.z * s * (tr.wallD + 1)); post.castShadow = true; scene.add(post); }
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(span, 1.2, 0.8), gm); beam.position.set(p.x, 7.6, p.z); beam.rotation.y = h; beam.castShadow = true; scene.add(beam);
+    const i0 = Math.round(8 / tr.ds), wl = tr.wallL[i0] + 1, wr = tr.wallR[i0] + 1, mid = (wl - wr) / 2;
+    for (const [s, o] of [[1, wl], [-1, wr]]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.6, 8, 0.6), gm); post.position.set(p.x + n.x * s * o, 4, p.z + n.z * s * o); post.castShadow = true; scene.add(post); }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(wl + wr, 1.2, 0.8), gm); beam.position.set(p.x + n.x * mid, 7.6, p.z + n.z * mid); beam.rotation.y = h; beam.castShadow = true; scene.add(beam);
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(span * .5, 1.1), std({ map: T.ads, side: THREE.DoubleSide })); sign.position.set(p.x, 8.9, p.z); sign.rotation.y = h; scene.add(sign);
     for (let i = 0; i < 5; i++) {
       const pod = new THREE.Group(), off = (i - 2) * 1.2;
@@ -276,6 +296,7 @@ export function buildWorld(def, T, renderer, { Q, profile = null } = {}) {
     }
   }
 
+  buildPitLane(scene, tr, T, R);
   if (tr.street) buildCity(scene, tr, T, R); else buildPark(scene, tr, T, R, heightAt, Q);
 
   // distant hills / mountains
@@ -312,21 +333,14 @@ function buildPark(scene, tr, T, R, heightAt, Q) {
     for (const x of [-12, 12]) { const col = new THREE.Mesh(new THREE.BoxGeometry(0.4, 11, 0.4), standM); col.position.set(x, 5.5, -10.4); g.add(col); }
     scene.add(g);
   };
-  for (let s = 40; s < 360; s += 25) { placeStand(s, -1); if (s > 100) placeStand(s, 1); }
+  const pitFree = s => !tr.pit.inZone(tr.pit.rel(s) ) || tr.pit.rel(s) > tr.pit.len + 20;
+  for (let s = 40; s < 360; s += 25) { placeStand(s, -1); if (s > 100 && pitFree(s - 15) && pitFree(s + 15)) placeStand(s, 1); }
   for (let s = tr.L - 300; s < tr.L - 30; s += 25) placeStand(s, -1);
-  { // pit building
-    const p = sampleAt(tr, tr.L - 150), h = Math.atan2(p.tx, p.tz), off = tr.wallD + 24;
-    const pit = new THREE.Mesh(new THREE.BoxGeometry(12, 9, 280), std({ color: '#dfe2e6', roughness: 0.6 }));
-    pit.position.set(p.x + p.nx * off, 4.5, p.z + p.nz * off); pit.rotation.y = h; pit.castShadow = true; scene.add(pit);
-    const band = new THREE.Mesh(new THREE.BoxGeometry(12.2, 1.2, 280.2), std({ color: '#e10600' }));
-    band.position.copy(pit.position); band.position.y = 8; band.rotation.y = h; scene.add(band);
-    const glass = new THREE.Mesh(new THREE.BoxGeometry(12.3, 2, 270), std({ color: '#223', metalness: 0.9, roughness: 0.1 }));
-    glass.position.copy(pit.position); glass.position.y = 5.5; glass.rotation.y = h; scene.add(glass);
-  }
   // marshal posts
   const mpM = std({ color: '#ff7a00' });
   for (let s = 150; s < tr.L; s += 380) {
-    const p = sampleAt(tr, s), side = (Math.floor(s / 380) % 2) ? 1 : -1, off = side * (tr.wallD + 3);
+    const side = (Math.floor(s / 380) % 2) ? 1 : -1; if (side > 0 && tr.pit.inZone(tr.pit.rel(s))) continue;
+    const p = sampleAt(tr, s), off = side * (tr.wallD + 3);
     const m = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.4, 2.2), mpM); m.position.set(p.x + p.nx * off, 1.2, p.z + p.nz * off); m.rotation.y = Math.atan2(p.tx, p.tz); m.castShadow = true; scene.add(m);
   }
   // trees (instanced, colour-varied)
@@ -361,6 +375,7 @@ function buildCity(scene, tr, T, R) {
   const geo = new THREE.BoxGeometry(1, 1, 1), placed = [];
   for (let s = 0; s < tr.L; s += 22) for (const side of [1, -1]) {
     if (R() < 0.12) continue;
+    if (side > 0 && (tr.pit.inZone(tr.pit.rel(s - 20)) || tr.pit.inZone(tr.pit.rel(s + 20)))) continue;
     const p = sampleAt(tr, s), dep = 12 + R() * 14, wid = 14 + R() * 8, hgt = 10 + R() * 34, off = side * (tr.wallD + 5 + dep / 2);
     const x = p.x + p.nx * off, z = p.z + p.nz * off;
     if (tr.distTo(x, z) < tr.wallD + 4 + dep / 2) continue;
@@ -373,6 +388,7 @@ function buildCity(scene, tr, T, R) {
   }
   const trunkM = new THREE.MeshStandardMaterial({ color: '#7a5a3a' }), leafM = new THREE.MeshStandardMaterial({ color: '#2f7a3a', side: THREE.DoubleSide });
   for (let s = 11; s < tr.L; s += 60) for (const side of [1, -1]) {
+    if (side > 0 && tr.pit.inZone(tr.pit.rel(s))) continue;
     const p = sampleAt(tr, s), off = side * (tr.wallD + 2.2), x = p.x + p.nx * off, z = p.z + p.nz * off;
     if (tr.distTo(x, z) < tr.wallD + 1.5) continue;
     const g = new THREE.Group(); g.position.set(x, 0, z);
@@ -387,6 +403,83 @@ function buildCity(scene, tr, T, R) {
     for (let r = 0; r < 6; r++) { const st = new THREE.Mesh(new THREE.BoxGeometry(24, 1, 1.5), crowdM); st.position.set(0, 0.6 + r * 1.1, r * 1.4); g.add(st); }
     scene.add(g);
   }
+}
+
+// Pit lane: tarmac lane with entry/exit lines, pit wall with gantry, garages (one per team), painted boxes
+function buildPitLane(scene, tr, T, R) {
+  const pit = tr.pit, std = o => new THREE.MeshStandardMaterial(o), N = tr.N;
+  const zoneJ = j => pit.inZone(pit.relI(j));
+  const laneIn = j => pit.laneLat(pit.relI(j)) - pit.laneHalf, laneOut = j => pit.laneLat(pit.relI(j)) + pit.laneHalf;
+  const off = (f, u = -2) => ({ polygonOffset: true, polygonOffsetFactor: f, polygonOffsetUnits: u });
+  // lane surface (reuses the track asphalt) and the strip between the track and the pit wall
+  const lane = new THREE.Mesh(ribbon(tr, j => Math.max(tr.halfW - 0.2, laneIn(j)), laneOut, 0.021, 0.021, { vScale: 13, filter: zoneJ }),
+    std({ map: T.asphalt, roughness: 0.85, side: THREE.DoubleSide, ...off(-2) }));
+  lane.receiveShadow = true; scene.add(lane);
+  const concrete = std({ color: '#9b9ea3', roughness: 0.9, side: THREE.DoubleSide, ...off(-1, -1) });
+  scene.add(new THREE.Mesh(ribbon(tr, tr.halfW, j => Math.max(tr.halfW, laneIn(j)), 0.019, 0.019, { vScale: 6, filter: j => zoneJ(j) && pit.wallOn(pit.relI(j)) }), concrete));
+  scene.add(new THREE.Mesh(ribbon(tr, laneOut, pit.garageIn, 0.019, 0.019, { vScale: 6, filter: j => zoneJ(j) && pit.wallOn(pit.relI(j)) }), concrete));
+  // painted lines: white lane edge, yellow/white entry and exit lines, speed-limit line
+  const white = new THREE.MeshBasicMaterial({ color: '#f2f2f2', side: THREE.DoubleSide, ...off(-6, -6) }), yellow = new THREE.MeshBasicMaterial({ color: '#ffd000', side: THREE.DoubleSide, ...off(-6, -6) });
+  scene.add(new THREE.Mesh(ribbon(tr, j => laneIn(j) + 0.1, j => laneIn(j) + 0.3, 0.023, 0.023, { filter: zoneJ }), white));
+  scene.add(new THREE.Mesh(ribbon(tr, j => pit.laneLat(pit.relI(j)) - 0.1, j => pit.laneLat(pit.relI(j)) + 0.1, 0.023, 0.023, { filter: j => zoneJ(j) && pit.wallOn(pit.relI(j)) }), white));
+  for (const r of [pit.ramp - 10, pit.len - pit.ramp + 10]) {
+    const p = sampleAt(tr, pit.entry + r), la = pit.laneLat(r), h = Math.atan2(p.tx, p.tz);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(pit.laneHalf * 2, 0.35), white); m.rotation.set(-Math.PI / 2, 0, h + Math.PI / 2);
+    m.position.set(p.x + p.nx * la, 0.024, p.z + p.nz * la); scene.add(m);
+  }
+  // pit wall (concrete, with a debris fence on top and gaps at each end)
+  const wallM = std({ color: '#d8dade', roughness: 0.7 }), wallTop = std({ color: '#e10600', roughness: 0.6 });
+  const wallF = j => zoneJ(j) && pit.wallOn(pit.relI(j));
+  const pw = new THREE.Mesh(ribbon(tr, pit.wall - 0.2, pit.wall - 0.2, 0, 1.05, { vScale: 10, filter: wallF }), std({ color: '#d8dade', roughness: 0.7, side: THREE.DoubleSide }));
+  pw.castShadow = true; scene.add(pw);
+  scene.add(new THREE.Mesh(ribbon(tr, pit.wall + 0.2, pit.wall + 0.2, 0, 1.05, { vScale: 10, filter: wallF }), std({ color: '#c9ccd0', roughness: 0.7, side: THREE.DoubleSide })));
+  scene.add(new THREE.Mesh(ribbon(tr, pit.wall - 0.22, pit.wall + 0.22, 1.05, 1.05, { vScale: 3, filter: wallF }), wallTop));
+  const fence = new THREE.MeshStandardMaterial({ map: T.fence.clone(), alphaTest: 0.4, side: THREE.DoubleSide, metalness: 0.6, roughness: 0.5 }); fence.map.needsUpdate = true; fence.map.repeat.set(1, 3);
+  scene.add(new THREE.Mesh(ribbon(tr, pit.wall, pit.wall, 1.05, 3.4, { vScale: 1.5, alongU: true, filter: wallF }), fence));
+  // garages: open-fronted boxes along the lane, team colours, with the player's box marked on the lane
+  const L0 = pit.ramp + 40, L1 = pit.len - pit.ramp - 40, n = Math.max(4, Math.floor((L1 - L0) / 15));
+  const step = (L1 - L0) / n, depth = pit.garageOut - pit.garageIn;
+  const shell = std({ color: '#e6e8eb', roughness: 0.6 }), floorM = std({ color: '#3a3d42', roughness: 0.4, metalness: 0.2 }), inner = std({ color: '#26282c', roughness: 0.8 });
+  const glassM = std({ color: '#1d2433', roughness: 0.1, metalness: 0.9 });
+  pit.garages = [];
+  const teamsOrder = [...Array(10).keys()];
+  for (let k = 0; k < n; k++) {
+    const r = L0 + step * (k + 0.5), p = sampleAt(tr, pit.entry + r), h = Math.atan2(p.tx, p.tz);
+    const c = pit.garageIn + depth / 2, g = new THREE.Group();
+    g.position.set(p.x + p.nx * c, 0, p.z + p.nz * c); g.rotation.y = h; scene.add(g);
+    const w = step - 0.6;
+    const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; g.add(m); return m; };
+    add(new THREE.BoxGeometry(depth, 0.1, w), floorM, 0, 0.05, 0);
+    add(new THREE.BoxGeometry(0.3, 5, w), inner, depth / 2 - 0.15, 2.5, 0);                   // back wall
+    for (const sz of [-1, 1]) add(new THREE.BoxGeometry(depth, 5, 0.3), shell, 0, 2.5, sz * (w / 2));
+    add(new THREE.BoxGeometry(depth + 0.6, 0.4, w + 0.6), shell, 0, 5.2, 0);                   // roof
+    add(new THREE.BoxGeometry(0.2, 1.2, w - 1), glassM, -depth / 2 - 0.05, 6.1, 0);             // hospitality glass above
+    const band = add(new THREE.BoxGeometry(0.25, 0.9, w), std({ color: '#888' }), -depth / 2 - 0.1, 4.7, 0);
+    pit.garages.push({ rel: r, band, group: g, team: teamsOrder[k % 10] });
+  }
+  // the player's box: painted outline in front of the middle garage
+  const bp = sampleAt(tr, pit.entry + pit.boxRel), bh = Math.atan2(bp.tx, bp.tz);
+  const box = new THREE.Group(); box.position.set(bp.x + bp.nx * pit.boxLat, 0.026, bp.z + bp.nz * pit.boxLat); box.rotation.y = bh; scene.add(box);
+  const boxM = new THREE.MeshBasicMaterial({ color: '#ffffff', ...off(-7, -7) });
+  pit.boxMat = boxM;
+  for (const [w, d, x, z] of [[2.6, 0.15, 0, 2.9], [2.6, 0.15, 0, -2.9], [0.15, 5.8, 1.3, 0], [0.15, 5.8, -1.3, 0]]) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), boxM); m.rotation.x = -Math.PI / 2; m.position.set(x, 0, z); box.add(m);
+  }
+  pit.boxGroup = box;
+  // the garage nearest the box belongs to the player
+  pit.playerGarage = pit.garages.reduce((a, g) => Math.abs(g.rel - pit.boxRel) < Math.abs(a.rel - pit.boxRel) ? g : a, pit.garages[0]);
+  // "PIT" entry board
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.2), new THREE.MeshBasicMaterial({ map: pitBoardTex(), side: THREE.DoubleSide }));
+  const sp = sampleAt(tr, pit.entry - 60); sign.position.set(sp.x + sp.nx * (tr.halfW + 3), 2.2, sp.z + sp.nz * (tr.halfW + 3)); sign.rotation.y = Math.atan2(sp.tx, sp.tz) + Math.PI; scene.add(sign);
+}
+function pitBoardTex() {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 128; const g = c.getContext('2d');
+  g.fillStyle = '#0a2a8a'; g.fillRect(0, 0, 256, 128); g.fillStyle = '#fff'; g.font = '900 64px Titillium Web, Arial'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('PIT ↗', 128, 66); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+// colour the garages (called once the grid is known)
+export function paintGarages(tr, teamsByGarage, TEAMS) {
+  tr.pit.garages.forEach((g, k) => { const t = TEAMS[teamsByGarage[k % teamsByGarage.length]]; g.band.material.color.set(t.c1); g.team = t; });
 }
 
 export function disposeScene(scene) {

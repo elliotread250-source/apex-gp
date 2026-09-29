@@ -41,13 +41,13 @@ export function carSpec(t) {
 
 // Circuits: control points (x, z metres) of a closed Catmull-Rom centreline
 export const TRACKS = [
-  { id: 'veloce', name: 'Autodromo Veloce', blurb: 'Temple of speed', width: 13, runoff: 16, style: 'park',
+  { id: 'veloce', name: 'Autodromo Veloce', blurb: 'Temple of speed', width: 13, runoff: 16, style: 'park', pit: { entry: -330, exit: 230 }, pit: { entry: -330, exit: 230 },
     sky: { turbidity: 4, rayleigh: 1.2, elev: 38, azim: 150 }, fog: '#b9cde3', exposure: 0.42, sunI: 4.2, hemi: 1.1,
     points: [[-350, 0], [200, 0], [600, 0], [700, 15], [780, -10], [900, 0], [1100, 60], [1200, 220], [1150, 400], [1000, 480], [700, 520], [400, 560], [200, 650], [0, 700], [-300, 700], [-420, 690], [-480, 720], [-560, 700], [-800, 650], [-1000, 550], [-1050, 350], [-980, 150], [-850, 30], [-650, 0]] },
-  { id: 'riviera', name: 'Riviera Street Circuit', blurb: 'Tight streets, zero margin', width: 10.5, runoff: 1.6, style: 'street',
+  { id: 'riviera', name: 'Riviera Street Circuit', blurb: 'Tight streets, zero margin', width: 10.5, runoff: 1.6, style: 'street', pit: { entry: -170, exit: 160 }, pit: { entry: -170, exit: 160 },
     sky: { turbidity: 7, rayleigh: 2.2, elev: 14, azim: 250 }, fog: '#d9b596', exposure: 0.4, sunI: 4.4, hemi: 0.9,
     points: [[40, 0], [250, 0], [300, -40], [300, -160], [380, -250], [520, -260], [560, -200], [520, -120], [560, -60], [700, -40], [760, 60], [700, 160], [500, 200], [300, 180], [200, 240], [80, 300], [-80, 280], [-160, 200], [-120, 120], [-220, 60], [-180, 0], [-80, -2]] },
-  { id: 'northfield', name: 'Northfield Grand Prix', blurb: 'Fast, flowing, overcast', width: 14, runoff: 20, style: 'park',
+  { id: 'northfield', name: 'Northfield Grand Prix', blurb: 'Fast, flowing, overcast', width: 14, runoff: 20, style: 'park', pit: { entry: -330, exit: 240 }, pit: { entry: -330, exit: 240 },
     sky: { turbidity: 18, rayleigh: 3.5, elev: 30, azim: 60 }, fog: '#aab1b8', exposure: 0.4, sunI: 2.2, hemi: 1.5,
     points: [[0, 0], [500, 0], [800, -50], [1000, -200], [1100, -450], [950, -650], [700, -700], [500, -600], [350, -650], [150, -800], [-150, -780], [-300, -600], [-250, -400], [-450, -300], [-600, -150], [-450, -20]] },
 ];
