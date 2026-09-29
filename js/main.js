@@ -3,7 +3,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { $, clamp, lerp, wrapAng, fmt, store } from './util.js';
 import { TEAMS, TRACKS, COMPOUNDS, carSpec } from './data.js';
 import { buildTextures, setAniso } from './textures.js';
-import { makeCar, disposeCar, makeSteeringWheel } from './carModel.js';
+import { makeCar, disposeCar, makeSteeringWheel, createDriverArms } from './carModel.js';
 import { buildWorld, sampleAt, gridPose, nearestIdx, surfaceAt, disposeScene } from './track.js';
 import { SURF, createCarPhys, stepCar, steerLimit, speedProfile, createAI, aiAccel, maxLatAccel, topSpeed } from './physics.js';
 import { createPost, createFX, createMirror } from './fx.js';
@@ -176,6 +176,10 @@ function newPlayer(tr, team, gp) {
     const sw = makeSteeringWheel(T, team), w = ASSETS.cfg.wheel || { pos: [0, 0.66, 0.26], tilt: -0.32, scale: 0.9 };
     sw.wheel.position.set(...w.pos); sw.wheel.rotation.x = w.tilt; sw.wheel.scale.setScalar(w.scale);
     car.group.add(sw.wheel); Object.assign(car, sw);
+  }
+  if (car.wheel) { // driver's arms, solved to the hands on the wheel every frame
+    const sh = (car.fromAsset && ASSETS.cfg.shoulders) || (car.fromAsset ? [[0.2, 0.6, -0.1], [-0.2, 0.6, -0.1]] : [[0.2, 0.7, -0.5], [-0.2, 0.7, -0.5]]);
+    car.arms = createDriverArms(team, T, sh); car.group.add(car.arms.group);
   }
   world.scene.add(car.group);
   const c = createCarPhys(spec, cmp);
@@ -632,6 +636,7 @@ function syncPlayerCar(dt) {
   for (const f of car.steer) f.rotation.y = st;
   car.drsFlap.rotation.x = c.drsOpen ? -0.75 : 0;
   if (car.wheel) car.wheel.rotation.z = -p.steer * 1.6;
+  if (car.arms) { g.updateMatrixWorld(true); car.arms.update(car.wheel, g); }
   car.rain.material.emissiveIntensity = c.harvest ? (Math.floor(S.time * 8) % 2 ? 4 : 0.3) : 0.4;
 }
 function syncAI(a, dt) {
@@ -681,6 +686,7 @@ function updateCamera(dt) {
   p.car.helmet.visible = p.car.visor.visible = !cockpit;
   p.car.pillar.visible = !(cockpit && S.hidePillar);
   document.body.classList.toggle('cockpitcam', cockpit && !!p.car.wheel);
+  if (p.car.arms) p.car.arms.group.visible = cockpit || !p.car.fromAsset; // the real model has no driver body, so only show arms from inside
   p.shake = Math.max(0, p.shake - dt * 2.5);
   const vib = p.shake * 0.05 + c.bump * 0.006 * Math.min(1, v / 20) + Math.min(v / 95, 1) * 0.0008 + (S.state === 'countdown' ? 0.0006 : 0);
   const jx = (Math.sin(t * 41) + Math.sin(t * 67.3) * 0.6) * vib, jy = (Math.sin(t * 53.7) + Math.sin(t * 89.1) * 0.5) * vib;

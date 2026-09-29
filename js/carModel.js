@@ -369,16 +369,79 @@ export function makeSteeringWheel(T, team) {
     const m = new THREE.MeshBasicMaterial({ color: '#111', toneMapped: false }); ledMats.push(m);
     const led = new THREE.Mesh(new THREE.CircleGeometry(0.0055, 10), m); led.position.set(0.063 - i * 0.014, 0.056, -0.028); led.rotation.y = Math.PI; wheel.add(led);
   }
-  // gloves wrapped round the grips, forearms in race-suit colour running back towards the driver
-  const glove = new THREE.MeshStandardMaterial({ color: '#16161a', roughness: 0.85 });
-  const suit = new THREE.MeshStandardMaterial({ color: team.c1, roughness: 0.8 });
+  // gloved hands wrapped round the grips (they turn with the wheel); wrist anchors for the arm rig
+  const leather = new THREE.MeshStandardMaterial({ color: '#141417', roughness: 0.62, metalness: 0.05 });
+  const palmM = new THREE.MeshStandardMaterial({ color: '#3a3a40', roughness: 0.95 });
+  const accent = new THREE.MeshStandardMaterial({ color: team.c1, roughness: 0.6 });
+  const wrists = [];
   for (const s of [-1, 1]) {
-    add(new THREE.SphereGeometry(0.034, 14, 12), glove, s * 0.152, 0.004, -0.02).scale.set(0.95, 1.55, 0.9);
-    add(new THREE.SphereGeometry(0.018, 10, 8), glove, s * 0.128, 0.03, -0.03); // thumb
-    const arm = add(new THREE.CapsuleGeometry(0.036, 0.26, 4, 12), suit, s * 0.2, -0.06, -0.17);
-    arm.rotation.set(1.15, 0, -s * 0.35);
-    add(new THREE.CylinderGeometry(0.04, 0.04, 0.05, 12), glove, s * 0.168, -0.018, -0.06, 1.15, 0, -s * 0.35); // glove cuff
+    const hand = new THREE.Group(); hand.position.set(s * 0.15, 0, 0); hand.rotation.z = s * 0.22; wheel.add(hand); // grip frame: axis = local y
+    // back of hand / palm pad sitting behind and outside the grip
+    add(new THREE.SphereGeometry(0.03, 16, 12), leather, s * 0.018, 0.004, -0.03, 0.15, 0, 0, hand).scale.set(1.05, 1.65, 0.78);
+    add(new THREE.CapsuleGeometry(0.0035, 0.045, 3, 6), accent, s * 0.02, 0.01, -0.053, 0.15, 0, 0, hand);    // team-colour stitch line on the back
+    add(new THREE.SphereGeometry(0.02, 12, 10), palmM, -s * 0.004, 0, -0.012, 0, 0, 0, hand).scale.set(1, 2.2, 0.6); // palm against the grip
+    // four fingers curled round the front of the grip
+    [-0.033, -0.011, 0.011, 0.031].forEach((y, k) => {
+      const f = add(new THREE.TorusGeometry(0.033, k === 3 ? 0.0085 : 0.0098, 8, 16, Math.PI * 1.15), leather, 0, y, 0, Math.PI / 2, 0, 0, hand);
+      f.rotation.z = s > 0 ? Math.PI * 0.35 : Math.PI * 0.5; // start behind the grip, wrap round the front
+      add(new THREE.SphereGeometry(0.0105, 8, 6), leather, -s * 0.024, y, 0.022, 0, 0, 0, hand); // fingertips
+    });
+    // thumb reaching in towards the buttons
+    const th = add(new THREE.CapsuleGeometry(0.0105, 0.03, 4, 8), leather, -s * 0.028, 0.034, -0.022, 0.2, 0, s * 0.95, hand);
+    add(new THREE.SphereGeometry(0.011, 8, 6), leather, -s * 0.045, 0.043, -0.02, 0, 0, 0, hand);
+    // gauntlet cuff; the wrist anchor sits at its back end
+    add(new THREE.CylinderGeometry(0.036, 0.04, 0.07, 14), leather, s * 0.024, -0.04, -0.07, 1.05, 0, 0, hand);
+    const w = new THREE.Object3D(); w.position.set(s * 0.024, -0.058, -0.105); hand.add(w); wrists.push(w);
+    void th;
   }
+  wheel.userData.wrists = wrists; // [left(+x) , right(-x)] in order of s = -1, 1
   wheel.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; } });
   return { wheel, dispCanvas: dc, dispTex: dtex, ledMats };
+}
+
+// Driver's arms: shoulder -> elbow -> wrist, solved each frame (two-bone IK) so the elbows bend
+// naturally as the hands turn the wheel. Race-suit fabric with a stripe down the sleeve.
+export function createDriverArms(team, T, shoulders) {
+  const g = new THREE.Group();
+  const fabric = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+    x.fillStyle = team.c1; x.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 2600; i++) { x.fillStyle = `rgba(${Math.random() < 0.5 ? '0,0,0' : '255,255,255'},${Math.random() * 0.07})`; x.fillRect(Math.random() * 128, Math.random() * 128, 2, 2); }
+    x.fillStyle = team.c2; x.fillRect(58, 0, 12, 128);                 // sleeve stripe
+    x.fillStyle = 'rgba(0,0,0,.25)'; x.fillRect(57, 0, 1, 128); x.fillRect(70, 0, 1, 128);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+  })();
+  const suit = new THREE.MeshStandardMaterial({ map: fabric, roughness: 0.88 });
+  const unitCyl = (r0, r1) => { const geo = new THREE.CylinderGeometry(r1, r0, 1, 18, 1, true); geo.translate(0, 0.5, 0); return geo; }; // base at y=0
+  const arms = shoulders.map(sh => {
+    const upper = new THREE.Mesh(unitCyl(0.052, 0.043), suit), fore = new THREE.Mesh(unitCyl(0.043, 0.035), suit);
+    const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.058, 16, 12), suit), elbow = new THREE.Mesh(new THREE.SphereGeometry(0.044, 14, 10), suit);
+    // a slight crease ring at the elbow and a bulge for the forearm
+    const crease = new THREE.Mesh(new THREE.TorusGeometry(0.043, 0.006, 6, 18), suit);
+    g.add(upper, fore, shoulder, elbow, crease);
+    return { S: new THREE.Vector3(...sh), upper, fore, shoulder, elbow, crease, side: Math.sign(sh[0]) };
+  });
+  const tmp = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0), q = new THREE.Quaternion();
+  const place = (mesh, A, B) => { tmp.copy(B).sub(A); const L = tmp.length(); mesh.position.copy(A); mesh.quaternion.setFromUnitVectors(Y, tmp.normalize()); mesh.scale.set(1, L, 1); };
+  const A_LEN = 0.29, B_LEN = 0.27;
+  return {
+    group: g,
+    // wristsWorld: world positions of the wrist anchors; car: the car group (arms live in car space)
+    update(wheel, carGroup) {
+      const wr = wheel.userData.wrists; if (!wr) return;
+      arms.forEach((arm, i) => {
+        const W = wr[arm.side < 0 ? 0 : 1].getWorldPosition(new THREE.Vector3()); carGroup.worldToLocal(W);
+        const S = arm.S, d = W.clone().sub(S); let L = d.length();
+        const dir = d.normalize(); L = Math.min(Math.max(L, 0.08), A_LEN + B_LEN - 0.002);
+        const x = (A_LEN * A_LEN - B_LEN * B_LEN + L * L) / (2 * L), h = Math.sqrt(Math.max(0, A_LEN * A_LEN - x * x));
+        const pole = new THREE.Vector3(arm.side * 1, -0.75, -0.15);            // elbows out and down
+        pole.sub(dir.clone().multiplyScalar(pole.dot(dir))).normalize();
+        const E = S.clone().add(dir.clone().multiplyScalar(x)).add(pole.multiplyScalar(h));
+        const Wc = S.clone().add(dir.multiplyScalar(L));
+        place(arm.upper, S, E); place(arm.fore, E, Wc);
+        arm.shoulder.position.copy(S); arm.elbow.position.copy(E);
+        arm.crease.position.copy(E); arm.crease.quaternion.copy(arm.fore.quaternion); arm.crease.rotateX(Math.PI / 2);
+      });
+    }
+  };
 }
