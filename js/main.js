@@ -8,6 +8,7 @@ import { buildWorld, sampleAt, gridPose, nearestIdx, surfaceAt, disposeScene } f
 import { SURF, createCarPhys, stepCar, steerLimit, speedProfile, createAI, aiAccel, maxLatAccel, topSpeed } from './physics.js';
 import { createPost, createFX, createMirror } from './fx.js';
 import { audio } from './audio.js';
+import { IS_TOUCH, IS_PHONE, touch, initTouch, setTouchActive, goFullscreenLandscape } from './touch.js';
 import { ASSETS, loadManifest, ensureModel, hasModel, carFromAsset } from './assets.js';
 
 // ============================================================ RENDERER
@@ -20,17 +21,20 @@ const QUALITY = {
   low:    { post: false, mirror: false, shadows: 0,    player: 'lo',   ai: 'lo',  garage: 'lo',   trees: 250,  terrainSeg: 70,  prStart: 0.65, prMax: 0.8 },
 };
 // pick a sensible default for this machine (school laptops / Chromebooks -> low)
+// Chrome without GPU acceleration renders on the CPU ("Basic Render Driver" / SwiftShader) -> 2-3 fps
+const GPU_NAME = (() => { try { const gl = renderer.getContext(); const e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : ''; } catch { return ''; } })();
+const SOFTWARE_GL = /Basic Render|SwiftShader|llvmpipe|Software|WARP/i.test(GPU_NAME);
 function detectQuality() {
-  let gpu = '';
-  try { const gl = document.createElement('canvas').getContext('webgl2') || document.createElement('canvas').getContext('webgl'); const e = gl.getExtension('WEBGL_debug_renderer_info'); gpu = e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : ''; } catch {}
+  const gpu = GPU_NAME;
   const cores = navigator.hardwareConcurrency || 4, mem = navigator.deviceMemory || 8;
-  if (/SwiftShader|llvmpipe|Software|Mali|PowerVR|Adreno|Intel.*HD Graphics|Intel\(R\) HD|UHD Graphics 6|Celeron|Pentium/i.test(gpu) || cores <= 2 || mem <= 2) return 'low';
+  if (IS_PHONE) return 'low';
+  if (SOFTWARE_GL || /Mali|PowerVR|Adreno|Intel.*HD Graphics|Intel\(R\) HD|UHD Graphics 6|Celeron|Pentium/i.test(gpu) || cores <= 2 || mem <= 2) return 'low';
   if (/Intel|Iris|Radeon\(TM\) Graphics|Radeon Graphics|Vega|Apple M1/i.test(gpu) || cores <= 4 || mem <= 4) return 'medium';
   return 'high';
 }
 const RES = { pr: 1, min: 0.45, max: 1, acc: 0, frames: 0, good: 0 };
 const Q = () => QUALITY[S.gfx] || QUALITY.medium;
-function applyQuality() { const q = Q(); RES.max = Math.min(devicePixelRatio, q.prMax); RES.pr = Math.min(RES.max, q.prStart); renderer.setPixelRatio(RES.pr); renderer.shadowMap.enabled = q.shadows > 0; }
+function applyQuality() { const q = Q(); RES.max = Math.min(devicePixelRatio, q.prMax) * (SOFTWARE_GL ? 0.5 : 1); RES.min = SOFTWARE_GL ? 0.25 : 0.45; RES.pr = Math.min(RES.max, q.prStart * (SOFTWARE_GL ? 0.55 : 1)); renderer.setPixelRatio(RES.pr); renderer.shadowMap.enabled = q.shadows > 0; }
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
@@ -77,20 +81,28 @@ function readInput() {
     edge(3, 'KeyC'); edge(12, 'Space'); edge(9, 'Escape'); edge(5, 'KeyX'); edge(4, 'KeyZ'); edge(2, 'KeyR');
     break;
   }
-  return { thr, brk, steer, analog, drs, ers };
+  let analogSteer = analog;
+  if (touch.active) {
+    if (touch.thr) thr = 1; if (touch.brk) brk = 1;
+    if (touch.steer !== null) { steer = touch.steer; analogSteer = true; }
+    drs = drs || touch.drs; ers = ers || touch.ers;
+  }
+  return { thr, brk, steer, analog, analogSteer, drs, ers };
 }
 
 // ============================================================ STATE
 const S = { mode: 'race', team: 0, track: 0, laps: 3, skill: 0.95, opp: 9, grid: 'back', tyre: 'medium', assists: 'full', gfx: 'high', camMode: 0, manual: false, fov: 62, state: 'menu', time: 0 };
 Object.assign(S, store.get('apex.settings2') || {});
-if (!store.get('apex.gfxChosen') || !QUALITY[S.gfx]) S.gfx = detectQuality();
+if (S.input !== 'kbm' && S.input !== 'mobile') S.input = IS_TOUCH ? 'mobile' : 'kbm';
+if (!store.get('apex.gfxChosen') || !QUALITY[S.gfx] || SOFTWARE_GL) S.gfx = detectQuality();
+if (SOFTWARE_GL) document.getElementById('gpuWarn').classList.remove('hidden');
 applyQuality();
 S.state = 'menu';
 let world = null, player = null, ais = [], fx = null, raceT0 = 0, countdown = null, finishInfo = null;
 
 function saveSettings() {
-  const { mode, team, track, laps, skill, opp, grid, tyre, assists, gfx, camMode, manual, fov, hidePillar } = S;
-  store.set('apex.settings2', { mode, team, track, laps, skill, opp, grid, tyre, assists, gfx, camMode, manual, fov, hidePillar });
+  const { mode, team, track, laps, skill, opp, grid, tyre, assists, gfx, camMode, manual, fov, hidePillar, input } = S;
+  store.set('apex.settings2', { mode, team, track, laps, skill, opp, grid, tyre, assists, gfx, camMode, manual, fov, hidePillar, input });
 }
 
 // ============================================================ SESSION
@@ -124,6 +136,7 @@ function startSession() {
   finishInfo = null; pressed.clear(); camInit = false; S.time = 0;
   $('#menu').classList.add('hidden'); $('#results').classList.add('hidden'); $('#pause').classList.add('hidden');
   $('#hud').classList.remove('hidden');
+  setTouchActive(S.input === 'mobile');
   $('#tower').classList.toggle('hidden', S.mode !== 'race');
   buildLeds(); prepMinimap();
   const cmp = COMPOUNDS[S.tyre];
@@ -180,14 +193,14 @@ function updatePlayer(dt, inp, locked) {
     muW.push(SURF[sf].mu); drag += SURF[sf].drag / 4; bump = Math.max(bump, SURF[sf].bump);
   });
   c.bump = bump;
-  if (p.finished) inp = { thr: 0.15, brk: c.vx > 25 ? 0.3 : 0, steer: clamp(-p.lat * 0.05 - rel * 1.5, -1, 1), drs: false, ers: false, analog: true };
+  if (p.finished) inp = { thr: 0.15, brk: c.vx > 25 ? 0.3 : 0, steer: clamp(-p.lat * 0.05 - rel * 1.5, -1, 1), drs: false, ers: false, analog: true, analogSteer: true };
 
   // pedal & steering smoothing (keyboard is digital)
   if (inp.analog) { p.thr = inp.thr; p.brk = inp.brk; }
   else { p.thr += clamp(inp.thr - p.thr, -dt * 10, dt * 6); p.brk += clamp(inp.brk - p.brk, -dt * 10, dt * 9); }
   const target = inp.steer, v = Math.abs(c.vx);
   // keyboard: progressive ramp that slows with speed, so taps are small corrections and holds are full turns
-  if (inp.analog) p.steerRaw = lerp(p.steerRaw || 0, target, Math.min(1, dt * 12));
+  if (inp.analogSteer) p.steerRaw = lerp(p.steerRaw || 0, target, Math.min(1, dt * 12));
   else {
     const sr = p.steerRaw || 0, speedK = 1 / (1 + v / 25);
     const rate = target === 0 ? 2.6 + 3 * speedK : (Math.sign(target) !== Math.sign(sr) && Math.abs(sr) > 0.05 ? 5 : 0.55 + 2.8 * speedK);
@@ -195,7 +208,7 @@ function updatePlayer(dt, inp, locked) {
   }
   // curved response: finer control around centre
   const sa = Math.abs(p.steerRaw);
-  p.steer = Math.sign(p.steerRaw) * (inp.analog ? sa : 0.35 * sa + 0.65 * sa * sa);
+  p.steer = Math.sign(p.steerRaw) * (inp.analogSteer ? sa : 0.35 * sa + 0.65 * sa * sa);
 
   // DRS / reverse
   const drsAvail = !!tr.drs[p.idx] && (S.mode === 'tt' || (raceT0 && Math.floor(p.total / tr.L) >= 1));
@@ -212,7 +225,7 @@ function updatePlayer(dt, inp, locked) {
   const full = S.assists === 'full';
   stepCar(c, { thr: p.thr, brk: p.brk, steer: p.steer, ers: inp.ers }, dt, {
     muW, drag, auto: !S.manual, abs: full, tc: S.assists !== 'off',
-    steerMax: steerLimit(spec, v, full) * (inp.analog ? 1.1 : 1)
+    steerMax: steerLimit(spec, v, full) * (inp.analogSteer ? 1.1 : 1)
   });
   if (c.shifted) { audio.shift(); c.shifted = 0; }
 
@@ -385,6 +398,7 @@ function standings() {
 }
 function showResults() {
   S.state = 'results';
+  setTouchActive(false);
   const tr = world.tr, now = S.time - raceT0;
   const rows = [player, ...ais].map(c => {
     const v = c === player ? player.c.vx : c.v;
@@ -644,6 +658,7 @@ function tick(dt) {
     }
   }
   pressed.clear();
+  $('#rotate').classList.toggle('hidden', !(touch.active && innerHeight > innerWidth * 1.05));
   if (S.state === 'paused') { audio.silence(); draw(); return; }
 
   S.time += dt;
@@ -748,6 +763,7 @@ function seg(id, key, parse = x => x, after) {
     b.onclick = () => { S[key] = parse(b.dataset.v); el.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); onMode(); after && after(); saveSettings(); };
   });
 }
+function onInput() { document.body.classList.toggle('mobileMode', S.input === 'mobile'); $('#keysTitle').textContent = S.input === 'mobile' ? 'Touch controls' : 'Keyboard controls'; }
 function onMode() { $('#raceOpts').style.display = S.mode === 'race' ? '' : 'none'; $('#startBtn').innerHTML = S.mode === 'race' ? 'LIGHTS OUT &nbsp;›' : 'START TIME TRIAL &nbsp;›'; }
 function renderTeams() {
   $('#teams').innerHTML = TEAMS.map((t, i) => `<button class="team ${i === S.team ? 'on' : ''}" data-i="${i}">
@@ -787,6 +803,7 @@ function showMenu() {
   if (world) { disposeScene(world.scene); world = null; }
   if (post) { post.dispose(); post = null; }
   $('#hud').classList.add('hidden'); $('#pause').classList.add('hidden'); $('#results').classList.add('hidden');
+  setTouchActive(false); $('#rotate').classList.add('hidden');
   $('#menu').classList.remove('hidden');
   audio.silence();
   renderTeams(); renderTracks(); onMode();
@@ -794,10 +811,11 @@ function showMenu() {
 function pause() { S.prevState = S.state; S.state = 'paused'; $('#pause').classList.remove('hidden'); }
 function resume() { S.state = S.prevState || 'race'; $('#pause').classList.add('hidden'); clock.getDelta(); }
 function go() {
+  if (S.input === 'mobile') goFullscreenLandscape();
   $('#loading').classList.remove('hidden'); $('#loading').textContent = 'BUILDING CIRCUIT…';
   S.state = 'loading';
   const q = Q();
-  Promise.all([ensureModel(q.player, f => { $('#loading').textContent = `LOADING CAR… ${Math.round(f * 100)}%`; }), ensureModel(q.ai)]).then(() => setTimeout(() => {
+  Promise.all([ensureModel(q.player, f => { $('#loading').textContent = `LOADING CAR… ${Math.min(100, Math.round(f * 100))}%`; }), ensureModel(q.ai)]).then(() => setTimeout(() => {
     clearCars();
     try { startSession(); } catch (e) { console.error(e); $('#loading').textContent = 'Error: ' + e.message; return; }
     $('#loading').classList.add('hidden'); clock.getDelta();
@@ -813,11 +831,13 @@ addEventListener('keydown', e => { if (e.code === 'Enter' && S.state === 'menu')
 
 seg('#modeSeg', 'mode'); seg('#lapSeg', 'laps', Number); seg('#aiSeg', 'skill', Number); seg('#oppSeg', 'opp', Number); seg('#gridSeg', 'grid');
 seg('#tyreSeg', 'tyre', x => x, () => setGarageCar(S.team)); seg('#assistSeg', 'assists');
+seg('#inputSeg', 'input', x => x, onInput); onInput();
 seg('#gfxSeg', 'gfx', x => x, () => { store.set('apex.gfxChosen', true); applyQuality(); ensureModel(Q().garage).then(() => setGarageCar(S.team)); });
 $('#loading').textContent = 'LOADING…';
 await loadManifest();
-await ensureModel(Q().garage, f => { $('#loading').textContent = `LOADING CAR… ${Math.round(f * 100)}%`; });
+await ensureModel(Q().garage, f => { $('#loading').textContent = `LOADING CAR… ${Math.min(100, Math.round(f * 100))}%`; });
 document.fonts?.ready.then(() => { if (S.state === 'menu') { renderTracks(); renderTeams(); } });
+initTouch(pressed, flash);
 showMenu();
 $('#loading').classList.add('hidden');
 frame();

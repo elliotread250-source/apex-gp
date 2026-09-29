@@ -118,3 +118,55 @@ table.res td.gap{text-align:right;color:var(--dim);font-variant-numeric:tabular-
 @media (max-height:760px){ #tyres{display:none} }
 
 body.photo #menu .panel, body.photo #carInfo{display:none}
+
+#gpuWarn{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:20;max-width:min(760px,94vw);background:#3a2400;border:1px solid #ffb000;color:#ffe2a3;
+  padding:10px 38px 10px 14px;font-size:13px;line-height:1.5;border-radius:6px;box-shadow:0 6px 30px rgba(0,0,0,.5)}
+#gpuWarn b{color:#fff}
+#gpuWarn button{position:absolute;right:8px;top:6px;background:none;border:0;color:#ffe2a3;font-size:16px}
+
+/* ---------- MOBILE / TOUCH ---------- */
+html,body{overscroll-behavior:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
+canvas#gl{touch-action:none}
+#menu .panel{touch-action:pan-y;-webkit-overflow-scrolling:touch}
+#mobileKeys{display:none}
+body.mobileMode #mobileKeys{display:grid} body.mobileMode #kbmKeys{display:none}
+body.touchplay #hint{display:none}
+#touch{position:absolute;inset:0;pointer-events:none;user-select:none;-webkit-user-select:none}
+#touch button{pointer-events:auto;font-family:inherit;touch-action:none;-webkit-user-select:none;user-select:none}
+#steerPad{position:absolute;left:0;bottom:0;width:46%;height:72%;pointer-events:auto;touch-action:none}
+#steerPad .padLabel{position:absolute;left:max(18px,env(safe-area-inset-left));bottom:18px;font-size:11px;letter-spacing:2px;color:rgba(255,255,255,.45);font-weight:700}
+body.tilt #steerPad{pointer-events:none} body.tilt #steerPad .padLabel{display:none}
+#steerBase{position:absolute;width:190px;height:64px;margin:-32px 0 0 -95px;border-radius:32px;background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.25);opacity:0;transition:opacity .12s}
+#steerBase.on{opacity:1}
+#steerKnob{position:absolute;left:50%;top:50%;width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.85);box-shadow:0 2px 12px rgba(0,0,0,.5);transform:translate(-50%,-50%)}
+#pedals{position:absolute;right:max(14px,env(safe-area-inset-right));bottom:14px;display:flex;gap:12px;align-items:flex-end}
+#pedals button{border:0;color:#fff;font-weight:900;letter-spacing:1px;border-radius:16px;box-shadow:0 4px 18px rgba(0,0,0,.45);transition:transform .05s,filter .05s}
+#brkBtn{width:92px;height:92px;background:rgba(200,30,30,.8);font-size:15px}
+#thrBtn{width:108px;height:150px;background:rgba(20,170,80,.85);font-size:22px}
+#pedals button.down,#auxBtns button.down{transform:scale(.94);filter:brightness(1.35)}
+#auxBtns{position:absolute;right:calc(max(14px,env(safe-area-inset-right)) + 120px);bottom:116px;display:flex;flex-direction:column;gap:8px}
+#auxBtns button{width:64px;height:40px;border-radius:10px;border:1px solid rgba(255,255,255,.3);background:rgba(15,15,22,.7);color:#fff;font-weight:900;font-size:13px}
+#topBtns{position:absolute;left:50%;top:max(8px,env(safe-area-inset-top));transform:translateX(-50%);display:flex;gap:6px}
+#topBtns button{min-width:48px;height:34px;padding:0 10px;border-radius:9px;border:1px solid rgba(255,255,255,.25);background:rgba(15,15,22,.65);color:#fff;font-weight:700;font-size:12px}
+#topBtns button.on{background:var(--red);border-color:var(--red)}
+#rotate{position:fixed;inset:0;z-index:30;background:#07070b;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;font-size:20px;font-weight:700;letter-spacing:1px}
+#rotate div{font-size:64px;animation:spin 2s ease-in-out infinite}
+@keyframes spin{0%,20%{transform:rotate(0)}60%,100%{transform:rotate(90deg)}}
+/* while driving with touch controls: move HUD out of the thumbs' way */
+body.touchplay #dash{bottom:8px;transform:translateX(-50%) scale(.8);transform-origin:bottom center}
+body.touchplay #tower,body.touchplay #tyres{display:none}
+body.touchplay #lights{top:52px}
+/* short landscape screens (phones) */
+@media (max-height:520px){
+  #posBox{left:max(10px,env(safe-area-inset-left));top:8px} #posBox .big{font-size:20px} #posBox div{padding:3px 9px}
+  #minimap{width:110px;height:110px;top:8px;right:max(10px,env(safe-area-inset-right))}
+  #timing{top:124px;right:max(10px,env(safe-area-inset-right));width:130px;padding:4px 8px;font-size:11px} #timing .cur{font-size:15px}
+  #tower,#tyres{display:none}
+  #dash{transform:translateX(-50%) scale(.7);transform-origin:bottom center;bottom:4px}
+  #msg{font-size:32px;top:22%} #sub{font-size:14px;top:calc(22% + 40px)}
+  #lights i{width:22px;height:22px} #lights{top:48px;gap:8px;padding:8px 10px}
+  #carInfo{display:none} #menu .panel{width:100%;padding:14px 18px}
+  .tracks{grid-template-columns:repeat(3,1fr)} .logo{font-size:36px}
+  #brkBtn{width:78px;height:78px} #thrBtn{width:92px;height:124px} #auxBtns{bottom:102px;right:calc(max(14px,env(safe-area-inset-right)) + 104px)}
+  .card{padding:16px 18px} .card h2{font-size:24px}
+}

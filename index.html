@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8">
 <title>APEX GP</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#07070b">
 <meta name="description" content="A first-person Formula-style racing sim that runs in your browser.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:ital,wght@0,400;0,600;0,700;0,900;1,900&display=swap" rel="stylesheet">
@@ -15,6 +18,7 @@
 </head>
 <body>
 <div id="loading">LOADING…</div>
+<div id="gpuWarn" class="hidden"><b>⚠ Chrome isn't using your graphics card</b> — the game is being drawn by the CPU, so it will be very slow.<br>Fix: Chrome <b>Settings → System →</b> turn on <b>“Use graphics acceleration when available”</b>, then <b>Relaunch</b>. Still slow? Open <b>chrome://gpu</b> to see why, and update your graphics driver.<button onclick="this.parentElement.classList.add('hidden')">✕</button></div>
 
 <div id="menu" class="hidden">
   <div class="panel">
@@ -49,10 +53,13 @@
       <div><h3>Graphics</h3><div class="seg" id="gfxSeg"><button data-v="high">High</button><button data-v="medium" class="on">Medium</button><button data-v="low">Low</button></div></div>
     </div>
 
+    <h3>Controls</h3>
+    <div class="seg" id="inputSeg"><button data-v="kbm">⌨ Keyboard &amp; mouse</button><button data-v="mobile">📱 Mobile (touch)</button></div>
+
     <button class="go" id="startBtn">LIGHTS OUT &nbsp;›</button>
 
-    <h3>Controls</h3>
-    <div class="keys">
+    <h3 id="keysTitle">Keyboard controls</h3>
+    <div class="keys" id="kbmKeys">
       <span><kbd>W</kbd> <kbd>↑</kbd></span><span>Throttle</span>
       <span><kbd>S</kbd> <kbd>↓</kbd></span><span>Brake / reverse when stopped</span>
       <span><kbd>A</kbd> <kbd>D</kbd> <kbd>←</kbd> <kbd>→</kbd></span><span>Steer</span>
@@ -70,6 +77,13 @@
       <span>🎮</span><span>Gamepad: RT/LT pedals, left stick steer, A = DRS, B = ERS, Y = camera, bumpers shift</span>
     </div>
     <p class="note" style="border-color:#444">Car model: "Scuderia Ferrari F1 SF23 2023" by <a href="https://sketchfab.com/redgrund" target="_blank" style="color:#bbb">Redgrund</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" style="color:#bbb">CC BY 4.0</a> (modified). Fan project, not affiliated with F1 or any team.</p>
+    <div class="keys" id="mobileKeys">
+      <span><b>Left thumb</b></span><span>Touch anywhere on the left half and slide left/right to steer (or tap <b>TILT</b> to steer by tilting the phone)</span>
+      <span><b>Right thumb</b></span><span>Big <b>GO</b> pedal = throttle, <b>BRAKE</b> pedal = brake / reverse when stopped</span>
+      <span><b>DRS / ERS</b></span><span>Hold for DRS (in green zones) and the ERS boost</span>
+      <span><b>Top buttons</b></span><span>Pause, camera, halo pillar, reset car</span>
+      <span>📱</span><span>Turn your phone sideways. Graphics <b>Low</b> is best on phones.</span>
+    </div>
     <p class="note">Tip: brake in a straight line at the 300/200/100 boards, and feed the throttle in gently out of slow corners. Cold tyres and too much throttle in a low gear will spin you, especially with assists off.</p>
   </div>
   <div id="carInfo"></div>
@@ -111,6 +125,19 @@
       </div>
     </div>
   </div>
+  <div id="touch" class="hidden">
+    <div id="steerPad"><div id="steerBase"><i id="steerKnob"></i></div><span class="padLabel">◀ SLIDE TO STEER ▶</span></div>
+    <div id="topBtns">
+      <button data-k="Escape" aria-label="Pause">❚❚</button>
+      <button data-k="KeyC" aria-label="Camera">CAM</button>
+      <button data-k="Space" aria-label="Halo pillar">HALO</button>
+      <button data-k="KeyR" aria-label="Reset">RESET</button>
+      <button id="tiltBtn" aria-label="Tilt steering">TILT</button>
+    </div>
+    <div id="auxBtns"><button id="drsBtn">DRS</button><button id="ersBtn">ERS</button></div>
+    <div id="pedals"><button id="brkBtn">BRAKE</button><button id="thrBtn">GO</button></div>
+  </div>
+  <div id="rotate" class="hidden"><div>⟳</div>Turn your phone sideways</div>
   <div id="hint"><kbd>C</kbd> camera · <kbd>R</kbd> reset · <kbd>Shift</kbd> DRS · <kbd>E</kbd> ERS · <kbd>Space</kbd> pillar · <kbd>[ ]</kbd> FOV · <kbd>Esc</kbd> pause</div>
 </div>
 
