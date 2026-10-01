@@ -198,3 +198,6 @@ body.touchplay #lights{top:52px}
 
 /* in the cockpit the steering wheel display shows speed/gear/LEDs, so hide the duplicate dash (kept on touch screens) */
 body.cockpitcam:not(.touchplay) #dash{display:none}
+
+.mpCheck{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;color:var(--ink);cursor:pointer}
+.mpCheck input{width:18px;height:18px;accent-color:var(--red)}

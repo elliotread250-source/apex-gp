@@ -326,6 +326,7 @@ function buildPark(scene, tr, T, R, heightAt, Q) {
   const standM = std({ color: '#555a63', roughness: 0.8 }), crowdM = std({ map: T.crowd, roughness: 0.9 }), roofM = std({ color: '#e8e8ea', roughness: 0.5, metalness: 0.3 });
   const placeStand = (s, side) => {
     const p = sampleAt(tr, s), h = Math.atan2(p.tx, p.tz), g = new THREE.Group(), off = side * (tr.wallD + 9);
+    (tr.stands ||= []).push({ x: p.x + p.nx * off, z: p.z + p.nz * off });
     g.position.set(p.x + p.nx * off, 0, p.z + p.nz * off); g.rotation.y = h + (side > 0 ? -Math.PI / 2 : Math.PI / 2);
     for (let r = 0; r < 7; r++) { const st = new THREE.Mesh(new THREE.BoxGeometry(24, 1, 1.6), crowdM); st.position.set(0, 0.6 + r * 1.1, -r * 1.5); st.receiveShadow = true; g.add(st); }
     const back = new THREE.Mesh(new THREE.BoxGeometry(24, 9, 0.6), standM); back.position.set(0, 4.5, -10.6); g.add(back);
@@ -399,6 +400,7 @@ function buildCity(scene, tr, T, R) {
   const crowdM = new THREE.MeshStandardMaterial({ map: T.crowd });
   for (let s = 20; s < 200; s += 26) {
     const p = sampleAt(tr, s), off = -(tr.wallD + 5), g = new THREE.Group();
+    (tr.stands ||= []).push({ x: p.x + p.nx * off, z: p.z + p.nz * off });
     g.position.set(p.x + p.nx * off, 0, p.z + p.nz * off); g.rotation.y = Math.atan2(p.tx, p.tz) - Math.PI / 2;
     for (let r = 0; r < 6; r++) { const st = new THREE.Mesh(new THREE.BoxGeometry(24, 1, 1.5), crowdM); st.position.set(0, 0.6 + r * 1.1, r * 1.4); g.add(st); }
     scene.add(g);

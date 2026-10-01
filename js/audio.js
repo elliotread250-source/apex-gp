@@ -48,6 +48,9 @@ export const audio = {
     this.rumble = mk('lowpass', 110, 1);
     this.gravel = mk('bandpass', 400, 1.2);
     this.intake = mk('bandpass', 900, 1.5);
+    // crowd: two bands of noise (murmur + voices) with slow random swells; cheer() adds a burst
+    this.crowdMur = mk('bandpass', 420, 0.7); this.crowdVox = mk('bandpass', 1400, 1.1);
+    this.crowdBase = 0; this.cheerUntil = 0;
     // two positional voices for nearby rivals (with doppler)
     this.aiVoices = [0, 1].map(() => {
       const pan = ctx.createPanner(); pan.panningModel = 'HRTF'; pan.distanceModel = 'inverse'; pan.refDistance = 6; pan.rolloffFactor = 1.4; pan.maxDistance = 400;
@@ -58,6 +61,7 @@ export const audio = {
   setMuted(m) { this.muted = m; store.set('apex.muted', m); if (this.master) this.master.gain.value = m ? 0 : 0.5; },
   silence() {
     if (!this.ctx) return; const t = this.ctx.currentTime;
+    if (this.crowdMur) { this.crowdMur.g.gain.setTargetAtTime(0, t, 0.2); this.crowdVox.g.gain.setTargetAtTime(0, t, 0.2); }
     if (this.sampleEng) this.sampleEng.set(8000, 0, t, 0);
     [this.eng.gain, this.turboG, this.wind.g, this.squeal.g, this.rumble.g, this.gravel.g, this.intake.g, ...this.aiVoices.map(a => a.v.gain)].forEach(g => g.gain.setTargetAtTime(0, t, 0.05));
   },
@@ -105,6 +109,19 @@ export const audio = {
     g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
     o.connect(g); g.connect(this.master); o.start(t); o.stop(t + 0.07);
   },
+  // near: 0..1 proximity to grandstands; excite: extra roar (e.g. passing at speed)
+  crowd(near, excite = 0) {
+    if (!this.ctx || !this.crowdMur) return;
+    const t = this.ctx.currentTime, now = performance.now();
+    if (near < 0) { this.crowdMur.g.gain.setTargetAtTime(0, t, 0.3); this.crowdVox.g.gain.setTargetAtTime(0, t, 0.3); return; }
+    const swell = 0.75 + 0.25 * Math.sin(now / 1700) * Math.sin(now / 610);
+    const cheer = now < this.cheerUntil ? (this.cheerUntil - now) / 2500 : 0;
+    const base = 0.035 + near * 0.16 * swell + excite * near * 0.12 + cheer * 0.22;
+    this.crowdMur.g.gain.setTargetAtTime(base, t, 0.25);
+    this.crowdVox.g.gain.setTargetAtTime(base * (0.55 + cheer * 0.9 + excite * near * 0.4), t, 0.15);
+    this.crowdVox.fl.frequency.setTargetAtTime(1200 + cheer * 700 + Math.sin(now / 900) * 120, t, 0.2);
+  },
+  cheer(sec = 2.5) { this.cheerUntil = Math.max(this.cheerUntil, performance.now() + sec * 1000); },
   thud(power) {
     if (!this.ctx || power < 0.05) return;
     const ctx = this.ctx, src = ctx.createBufferSource(); src.buffer = this.noiseBuf;

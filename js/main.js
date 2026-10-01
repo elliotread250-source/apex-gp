@@ -6,6 +6,7 @@ import { buildTextures, setAniso } from './textures.js';
 import { makeCar, disposeCar, makeSteeringWheel, createDriverArms } from './carModel.js';
 import { buildWorld, sampleAt, gridPose, nearestIdx, surfaceAt, disposeScene, paintGarages } from './track.js';
 import { createCrew } from './pit.js';
+import { commentary, spokenTime } from './commentary.js';
 import { SURF, createCarPhys, stepCar, steerLimit, speedProfile, createAI, aiAccel, maxLatAccel, topSpeed } from './physics.js';
 import { createPost, createFX, createMirror } from './fx.js';
 import { audio } from './audio.js';
@@ -107,8 +108,8 @@ const field = () => [player, ...ais, ...remotes];
 if (!S.name) S.name = 'Driver ' + (10 + Math.floor(Math.random() * 90));
 
 function saveSettings() {
-  const { mode, team, track, laps, skill, opp, grid, tyre, assists, gfx, camMode, manual, fov, hidePillar, input, name } = S;
-  store.set('apex.settings2', { mode, team, track, laps, skill, opp, grid, tyre, assists, gfx, camMode, manual, fov, hidePillar, input, name });
+  const { mode, team, track, laps, skill, opp, grid, tyre, assists, gfx, camMode, manual, fov, hidePillar, input, name, commentary: comm } = S;
+  store.set('apex.settings2', { mode, team, track, laps, skill, opp, grid, tyre, assists, gfx, camMode, manual, fov, hidePillar, input, name, commentary: comm });
 }
 
 // ============================================================ SESSION
@@ -159,6 +160,7 @@ function startSession(netCfg) {
   $('#cmp').textContent = cmp.key; $('#cmp').style.borderColor = cmp.color;
   $('#assistTxt').textContent = S.assists === 'full' ? 'TC · ABS' : S.assists === 'some' ? 'TC' : 'NO ASSISTS';
   $('#restartBtn').classList.toggle('hidden', !!netCfg);
+  commentary.enabled = COMM.on(); if (!commentary.enabled) commentary.stop(); resetComm();
   if (netCfg) {
     // wait on the grid until every player has loaded, then the host starts the lights for everyone
     S.state = 'waiting'; countdown = { t: 0, lit: 0, out: netCfg.out };
@@ -229,12 +231,14 @@ function newRemote(tr, p, gp) {
 const r2 = x => Math.round(x * 100) / 100;
 function packState(e) {
   const pl = e === player, v = pl ? e.c.vx : e.v;
-  return [r2(e.x), r2(e.z), r2(e.h), r2(v), r2(e.s), r2(e.lat), r2(e.total), e.finished ? 1 : 0, r2(e.finishTime || 0), pl ? Math.round(e.c.rpm) : Math.round(e.rpm || 6000)];
+  return [r2(e.x), r2(e.z), r2(e.h), r2(v), r2(e.s), r2(e.lat), r2(e.total), e.finished ? 1 : 0, r2(e.finishTime || 0), pl ? Math.round(e.c.rpm) : Math.round(e.rpm || 6000),
+    pl ? Math.max(0, e.maxLap) : 0, pl ? r2(e.last || 0) : 0, pl ? r2(e.best || 0) : 0, pl && e.pitStop ? 1 : 0, pl ? r2(e.lastPitT || 0) : 0];
 }
 function applyState(e, a) {
   if (!e || !Array.isArray(a)) return;
   e.net = { x: a[0], z: a[1], h: a[2], v: a[3], s: a[4], lat: a[5], total: a[6], t: performance.now() };
   e.finished = !!a[7]; e.finishTime = a[7] ? a[8] : null; e.rpm = a[9] || 6000;
+  e.lapsDone = a[10] || 0; e.lastLap = a[11] || null; e.bestLap = a[12] || null; e.pitting = !!a[13]; e.lastPitT = a[14] || 0;
 }
 // smooth network-driven cars: extrapolate by their speed, then ease towards it
 function updatePuppets(list, dt) {
@@ -371,6 +375,7 @@ function updatePlayer(dt, inp, locked) {
       c.r = c.r * 0.3 + align * Math.min(3, -vn * 0.25);
       const hit = -vn;
       audio.thud(hit / 14); p.shake = Math.max(p.shake, hit / 25);
+      if (hit > 14 && COMM.on() && S.time - (p.lastCrashCall || -99) > 15) { p.lastCrashCall = S.time; commentary.say('crash', { name: S.name }, 2); }
       if (hit > 9) { c.damage = Math.min(1, c.damage + (hit - 9) / 28); if (c.damage > 0.35 && !p.wingGone) { p.wingGone = true; p.car.frontWing.forEach(m => m.visible = false); flash('', 'FRONT WING DAMAGE', 2.5, 'warn'); } }
       for (let i = 0; i < Math.min(30, hit * 2); i++) fx.sparks.emit(c.x - nx * 1, 0.4, c.z - nz * 1, Vx * 0.5 + (Math.random() - .5) * 6, Math.random() * 4, Vz * 0.5 + (Math.random() - .5) * 6, 0.4, 0.12, 0, 1, 1, 0.8, 0.4);
     }
@@ -423,7 +428,73 @@ function updatePitStop(dt) {
     onPitStopEnd?.(stopT);
   }
 }
-let onPitStopStart = null, onPitStopEnd = null;
+let onPitStopStart = () => { if (COMM.on()) commentary.say('pitIn', { name: S.name }, 2); };
+let onPitStopEnd = t => { if (COMM.on()) commentary.say('pitOut', { name: S.name, secs: t.toFixed(1) }, 2); };
+
+// ---------------- race commentary & crowd (multiplayer only) ----------------
+const COMM = { on: () => !!NET.role && S.commentary !== false, raceBest: null, order: null, orderT: 0, lastOvertake: -99, finalSaid: false, winSaid: false, finishSaid: new Set(), lap1Said: false, fillerAt: 0, seenLaps: new Map(), seenPit: new Map() };
+const nameOf = e => e === player ? S.name : e.name || e.code;
+function resetComm() { Object.assign(COMM, { raceBest: null, order: null, orderT: 0, lastOvertake: -99, finalSaid: false, winSaid: false, finishSaid: new Set(), lap1Said: false, fillerAt: S.time + 30, seenLaps: new Map(), seenPit: new Map() }); }
+function commLap(e, lt) {
+  if (!COMM.on() || !lt) return;
+  if (!COMM.raceBest || lt < COMM.raceBest.t - 0.001) {
+    const first = !COMM.raceBest; COMM.raceBest = { t: lt, e };
+    if (!first || RACE()) { commentary.say('fastest', { name: nameOf(e), time: spokenTime(lt) }, 2); audio.cheer(1.5); }
+  } else if (e === player && player.best === lt) commentary.say('pb', { name: S.name, time: spokenTime(lt) }, 1);
+}
+function commTick(dt) {
+  if (!world || !player) return;
+  const tr = world.tr, on = COMM.on();
+  // crowd: how close the camera is to the nearest grandstand, louder when you're flying past
+  let near = 0;
+  if (on && tr.stands) { let d = 1e9; for (const st of tr.stands) d = Math.min(d, Math.hypot(st.x - camera.position.x, st.z - camera.position.z)); near = Math.max(0, 1 - d / 140); }
+  audio.crowd(on ? near : -1, on ? Math.min(1, Math.abs(player.c.vx) / 80) : 0);
+  if (!on || S.state !== 'race') return;
+  const st = standings(), L = tr.L;
+  // remote laps / pit stops
+  for (const r of remotes) {
+    const prev = COMM.seenLaps.get(r.id) || 0;
+    if (r.lapsDone > prev) { COMM.seenLaps.set(r.id, r.lapsDone); if (r.lastLap) commLap(r, r.lastLap); }
+    const wasPit = COMM.seenPit.get(r.id) || false;
+    if (r.pitting && !wasPit) commentary.say('pitIn', { name: r.name }, 1);
+    if (!r.pitting && wasPit && r.lastPitT) commentary.say('pitOut', { name: r.name, secs: r.lastPitT.toFixed(1) }, 1);
+    COMM.seenPit.set(r.id, r.pitting);
+  }
+  const leader = st[0], leadLaps = Math.floor(leader.total / L);
+  if (!COMM.lap1Said && leadLaps >= 1 && S.laps > 1) { COMM.lap1Said = true; commentary.say('lap1', { leader: nameOf(leader) }, 1); }
+  if (!COMM.finalSaid && S.laps > 1 && leadLaps === S.laps - 1) { COMM.finalSaid = true; commentary.say('finalLap', { name: nameOf(leader) }, 2); }
+  // overtakes (checked twice a second, only between cars close together)
+  if (S.time - COMM.orderT > 0.5) {
+    COMM.orderT = S.time;
+    const ids = st.map(e => e === player ? 'me' : e.id || e.code);
+    if (COMM.order && S.time - COMM.lastOvertake > 4 && S.time - raceT0 > 8) {
+      for (let i = 0; i < st.length; i++) {
+        const was = COMM.order.indexOf(ids[i]);
+        if (was > i && !st[i].finished) {
+          const passed = st[i + 1]; if (!passed || Math.abs(st[i].total - passed.total) > 60) continue;
+          COMM.lastOvertake = S.time; audio.cheer(2.2);
+          if (i === 0) commentary.say('lead', { name: nameOf(st[0]) }, 3);
+          else commentary.say('overtake', { a: nameOf(st[i]), b: nameOf(passed), pos: i + 1 }, 2);
+          break;
+        }
+      }
+    }
+    COMM.order = ids;
+  }
+  // finishes
+  st.forEach((e, i) => {
+    if (!e.finished || COMM.finishSaid.has(e)) return;
+    COMM.finishSaid.add(e);
+    if (!COMM.winSaid && i === 0) { COMM.winSaid = true; commentary.say('win', { name: nameOf(e) }, 3); audio.cheer(6); }
+    else if (e === player) commentary.say('finish', { name: S.name, pos: i + 1 }, 2);
+  });
+  // chatter when nothing is happening
+  if (S.time > COMM.fillerAt && !commentary.speaking) {
+    COMM.fillerAt = S.time + 22 + Math.random() * 18;
+    const gap = st[1] ? Math.max(0.1, (st[0].total - st[1].total) / Math.max(30, Math.abs(st[1] === player ? player.c.vx : st[1].v || 40))).toFixed(1) : '0';
+    commentary.say('filler', { leader: nameOf(st[0]), gap }, 1);
+  }
+}
 
 function resetPlayer() {
   const tr = world.tr, p = player, c = p.c, q = sampleAt(tr, p.s - 5);
@@ -527,7 +598,7 @@ function updateProgress() {
     } else if (lapIdx >= 1) {
       closeSector(2, S.time - p.secStart);
       const lt = S.time - p.lapStart; p.lapStart = S.time; p.sector = 0; p.secStart = S.time;
-      p.last = lt; p.lapTimes.push(lt);
+      p.last = lt; p.lapTimes.push(lt); commLap(p, lt);
       const pb = p.best == null || lt < p.best;
       if (pb) { p.best = lt; p.bestTrace = p.trace.slice(); }
       p.trace = new Float32Array(p.trace.length);
@@ -852,6 +923,7 @@ function tick(dt) {
     if (countdown.t >= countdown.out) {
       renderLights(0); S.state = 'race'; raceT0 = S.time; player.lapStart = S.time; player.secStart = S.time;
       flash('LIGHTS OUT', 'AND AWAY WE GO!', 1.8); audio.beep(880, 0.4);
+      if (COMM.on()) { commentary.say('start', {}, 3); audio.cheer(4); }
       setTimeout(() => $('#lights').classList.add('hidden'), 900);
     }
   }
@@ -866,6 +938,7 @@ function tick(dt) {
   if (!aiLocal) updatePuppets(ais, dt);
   updatePuppets(remotes, dt);
   netTick(dt);
+  commTick(dt);
   if (!locked) updateProgress();
   if (finishInfo && S.state !== 'results' && S.time - finishInfo.at > 4) showResults();
   // lift-off crackle
@@ -1010,6 +1083,7 @@ function hostStart() {
   clearTimeout(goTimer); goTimer = setTimeout(() => maybeGo(true), 25000);
 }
 function startNetRace(cfg) {
+  commentary.unlock();
   Object.assign(S, { track: cfg.track, laps: cfg.laps, skill: cfg.skill });
   if (S.input === 'mobile') goFullscreenLandscape();
   $('#loading').classList.remove('hidden'); $('#loading').textContent = 'LOADING RACE…';
@@ -1062,7 +1136,7 @@ function showMenu() {
   $('#hud').classList.add('hidden'); $('#pause').classList.add('hidden'); $('#results').classList.add('hidden');
   setTouchActive(false); $('#rotate').classList.add('hidden');
   $('#menu').classList.remove('hidden');
-  audio.silence();
+  audio.silence(); commentary.stop();
   renderTeams(); renderTracks(); renderLobby();
 }
 function pause() { if (NET.role) { $('#pause').classList.remove('hidden'); return; } S.prevState = S.state; S.state = 'paused'; $('#pause').classList.remove('hidden'); }
@@ -1091,6 +1165,9 @@ $('#mpName').value = S.name;
 $('#mpName').addEventListener('input', e => { S.name = e.target.value.trim().slice(0, 14) || 'Driver'; saveSettings(); });
 $('#mpName').addEventListener('change', () => updateMe(me()));
 $('#mpCreate').onclick = mpCreate;
+$('#mpComm').checked = S.commentary !== false;
+$('#mpComm').onchange = e => { S.commentary = e.target.checked; saveSettings(); };
+commentary.init();
 $('#mpJoin').onclick = () => mpJoin();
 $('#mpCode').addEventListener('input', e => { e.target.value = cleanCode(e.target.value); });
 $('#mpCode').addEventListener('keydown', e => { if (e.key === 'Enter') mpJoin(); });
