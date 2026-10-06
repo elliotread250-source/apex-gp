@@ -7,6 +7,7 @@ import { makeCar, disposeCar, makeSteeringWheel, createDriverArms } from './carM
 import { buildWorld, sampleAt, gridPose, nearestIdx, surfaceAt, disposeScene, paintGarages } from './track.js';
 import { createCrew } from './pit.js';
 import { commentary, spokenTime } from './commentary.js';
+import { buildRaceLine } from './raceline.js';
 import { SURF, createCarPhys, stepCar, steerLimit, speedProfile, createAI, aiAccel, maxLatAccel, topSpeed } from './physics.js';
 import { createPost, createFX, createMirror } from './fx.js';
 import { audio } from './audio.js';
@@ -106,10 +107,11 @@ let world = null, player = null, ais = [], remotes = [], fx = null, raceT0 = 0, 
 const RACE = () => S.mode !== 'tt';
 const field = () => [player, ...ais, ...remotes];
 if (!S.name) S.name = 'Driver ' + (10 + Math.floor(Math.random() * 90));
+if (!['full', 'brake', 'off'].includes(S.line)) S.line = 'full';
 
 function saveSettings() {
-  const { mode, team, track, laps, skill, opp, grid, tyre, assists, gfx, camMode, manual, fov, hidePillar, input, name, commentary: comm } = S;
-  store.set('apex.settings2', { mode, team, track, laps, skill, opp, grid, tyre, assists, gfx, camMode, manual, fov, hidePillar, input, name, commentary: comm });
+  const { mode, team, track, laps, skill, opp, grid, tyre, assists, gfx, camMode, manual, fov, hidePillar, input, name, commentary: comm, line } = S;
+  store.set('apex.settings2', { mode, team, track, laps, skill, opp, grid, tyre, assists, gfx, camMode, manual, fov, hidePillar, input, name, commentary: comm, line });
 }
 
 // ============================================================ SESSION
@@ -155,6 +157,7 @@ function startSession(netCfg) {
   $('#tower').classList.toggle('hidden', !RACE());
   { const pg = trk.pit.garages, pi = pg.indexOf(trk.pit.playerGarage), order = pg.map((_, k) => (k * 3 + 1) % TEAMS.length);
     order[pi] = TEAMS.indexOf(player.team); paintGarages(trk, order, TEAMS); trk.pit.boxMat.color.set(player.team.c1); }
+  world.raceLine = buildRaceLine(trk, world.scene); world.playerProfile = speedProfile(trk, player.spec, 1);
   buildLeds(); prepMinimap();
   const cmp = COMPOUNDS[S.tyre];
   $('#cmp').textContent = cmp.key; $('#cmp').style.borderColor = cmp.color;
@@ -903,6 +906,7 @@ function tick(dt) {
     if (pressed.has('BracketLeft') || pressed.has('BracketRight')) { S.fov = clamp(S.fov + (pressed.has('BracketRight') ? 4 : -4), 46, 90); saveSettings(); flash('', 'Field of view ' + S.fov + '°', 1); }
     if (pressed.has('Space')) { S.hidePillar = !S.hidePillar; saveSettings(); flash('', S.hidePillar ? 'Halo pillar hidden' : 'Halo pillar shown', 1); }
     if (player.inPitLane) for (const [k, t] of [['Digit1', 'soft'], ['Digit2', 'medium'], ['Digit3', 'hard']]) if (pressed.has(k)) { player.nextTyre = t; flash('', 'Next tyres: ' + t.toUpperCase(), 1.4); }
+    if (pressed.has('KeyL')) { S.line = { full: 'brake', brake: 'off', off: 'full' }[S.line]; saveSettings(); seg('#lineSeg', 'line'); flash('', { full: 'Racing line: full', brake: 'Racing line: braking zones only', off: 'Racing line off' }[S.line], 1.4); }
     if (pressed.has('KeyG')) { S.manual = !S.manual; saveSettings(); flash('', S.manual ? 'Manual gearbox — X up, Z down' : 'Automatic gearbox', 1.5); }
     const c = player.c;
     if (S.manual && !c.reverse) {
@@ -965,6 +969,7 @@ function tick(dt) {
       return { x: a.x, z: a.z, rpm: a.rpm, doppler: clamp((343 + vl) / (343 - vs), 0.7, 1.4) };
     })
   });
+  world.raceLine?.update(player, world.playerProfile, player.spec, S.line);
   renderer.shadowMap.needsUpdate = true;
   renderMirror();
   draw();
@@ -1182,7 +1187,7 @@ $('#mpCopy').onclick = async () => {
 }
 
 seg('#modeSeg', 'mode', x => x, () => renderLobby()); seg('#lapSeg', 'laps', Number); seg('#aiSeg', 'skill', Number); seg('#oppSeg', 'opp', Number); seg('#gridSeg', 'grid');
-seg('#tyreSeg', 'tyre', x => x, () => setGarageCar(S.team)); seg('#assistSeg', 'assists');
+seg('#tyreSeg', 'tyre', x => x, () => setGarageCar(S.team)); seg('#assistSeg', 'assists'); seg('#lineSeg', 'line');
 seg('#inputSeg', 'input', x => x, onInput); onInput();
 seg('#gfxSeg', 'gfx', x => x, () => { store.set('apex.gfxChosen', true); applyQuality(); ensureModel(Q().garage).then(() => setGarageCar(S.team)); });
 $('#loading').textContent = 'LOADING…';

@@ -40,7 +40,7 @@ export function speedProfile(tr, spec, skill = 1) {
   const vmax = topSpeed(spec) * (0.97 + 0.03 * skill);
   const power = spec.power * (0.9 + 0.1 * skill);
   for (let i = 0; i < N; i++) {
-    const k = Math.abs(tr.kS[i]) * 0.9;
+    const k = tr.kLine ? Math.abs(tr.kLine[i]) * 1.02 : Math.abs(tr.kS[i]) * 0.9;
     let x = vmax;
     if (k > 1e-5) { x = 60; for (let it = 0; it < 10; it++) x = Math.min(vmax, Math.sqrt(maxLatAccel(spec, x, skill) / k)); }
     v[i] = x;

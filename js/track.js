@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { clamp, lerp, rng } from './util.js';
 import { boardTex } from './textures.js';
+import { optimiseLine } from './raceline.js';
 
 // ============================================================ TRACK DATA
 export function buildTrack(def) {
@@ -69,6 +70,8 @@ export function buildTrack(def) {
     const arr = c.sgn > 0 ? tr.runR : tr.runL;   // outside of a left-hander is the right side
     for (let j = -12; j < c.len + 55; j++) arr[(c.i0 + j + N) % N] = type;
   });
+  // minimum-curvature racing line (outside -> apex -> outside)
+  { const opt = optimiseLine(tr); tr.line = opt.lat; tr.kLine = opt.kLine; }
   // spatial hash for distance queries
   const cell = 40, grid = new Map();
   for (let i = 0; i < N; i += 2) { const key = Math.floor(P[i].x / cell) + ',' + Math.floor(P[i].z / cell); if (!grid.has(key)) grid.set(key, []); grid.get(key).push(i); }

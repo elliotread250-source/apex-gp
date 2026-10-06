@@ -82,6 +82,7 @@
     <div class="opts">
       <div><h3>Tyres</h3><div class="seg" id="tyreSeg"><button data-v="soft">Soft</button><button data-v="medium" class="on">Medium</button><button data-v="hard">Hard</button></div></div>
       <div><h3>Assists</h3><div class="seg" id="assistSeg"><button data-v="full" class="on">Full</button><button data-v="some">TC only</button><button data-v="off">Off</button></div></div>
+      <div><h3>Racing line</h3><div class="seg" id="lineSeg"><button data-v="full" class="on">Full</button><button data-v="brake">Braking</button><button data-v="off">Off</button></div></div>
       <div><h3>Graphics</h3><div class="seg" id="gfxSeg"><button data-v="high">High</button><button data-v="medium" class="on">Medium</button><button data-v="low">Low</button></div></div>
     </div>
 
@@ -101,6 +102,7 @@
       <span><kbd>X</kbd> <kbd>Z</kbd></span><span>Shift up / down (manual)</span>
       <span><kbd>C</kbd></span><span>Camera: cockpit → T-cam → chase</span>
       <span><kbd>Space</kbd></span><span>Hide / show the halo's centre pillar (cockpit view)</span>
+      <span><kbd>L</kbd></span><span>Racing line: full → braking only → off</span>
       <span><kbd>B</kbd></span><span>Look behind</span>
       <span><kbd>[</kbd> <kbd>]</kbd></span><span>Field of view narrower / wider</span>
       <span><kbd>R</kbd></span><span>Reset car to track</span>
@@ -164,13 +166,14 @@
       <button data-k="KeyC" aria-label="Camera">CAM</button>
       <button data-k="Space" aria-label="Halo pillar">HALO</button>
       <button data-k="KeyR" aria-label="Reset">RESET</button>
+      <button data-k="KeyL" aria-label="Racing line">LINE</button>
       <button id="tiltBtn" aria-label="Tilt steering">TILT</button>
     </div>
     <div id="auxBtns"><button id="drsBtn">DRS</button><button id="ersBtn">ERS</button></div>
     <div id="pedals"><button id="brkBtn">BRAKE</button><button id="thrBtn">GO</button></div>
   </div>
   <div id="rotate" class="hidden"><div>⟳</div>Turn your phone sideways</div>
-  <div id="hint"><kbd>C</kbd> camera · <kbd>R</kbd> reset · <kbd>Shift</kbd> DRS · <kbd>E</kbd> ERS · <kbd>Space</kbd> pillar · <kbd>[ ]</kbd> FOV · <kbd>Esc</kbd> pause</div>
+  <div id="hint"><kbd>C</kbd> camera · <kbd>R</kbd> reset · <kbd>Shift</kbd> DRS · <kbd>E</kbd> ERS · <kbd>Space</kbd> pillar · <kbd>L</kbd> line · <kbd>[ ]</kbd> FOV · <kbd>Esc</kbd> pause</div>
 </div>
 
 <div id="pause" class="overlay hidden">
